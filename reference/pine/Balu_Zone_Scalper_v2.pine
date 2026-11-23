@@ -1,0 +1,895 @@
+//@version=6
+indicator("Balu Zone Scalper v2.2", shorttitle="Balu v2.2", overlay=true, max_boxes_count=200, max_labels_count=400, max_lines_count=100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2 CHANGES (see Script_Review_Balu_Hybrid.md)
+//   - Golden Line "VWAP" falls back to a session TWAP (or proxy-symbol volume) when the
+//     chart has no volume. On NSE:NIFTY spot v1's ta.vwap was na, so Regime was always
+//     NEUTRAL and the regime alerts never fired.
+//   - HTF swings are read from COMPLETED HTF bars only ([1] + lookahead_on) and added
+//     once per HTF bar, so zones no longer appear live and then vanish on reload.
+//   - Flow slope is built from per-bar delta, so the daily reset of the cumulative
+//     line no longer shows up as a fake FALLING/RISING spike near the open.
+//   - Path history starts only on confirmed state changes, with one active episode
+//     across ALL states. Timeouts, ambiguous bars and session cuts remain visible.
+//     Counts are descriptive, not independent samples or a forecast of trade success.
+//   - Regime / divergence / pressure alerts fire on the bar close; separate EARLY
+//     pressure alerts are available for the forming bar (these can cancel).
+//   v2.1 FIXES
+//   - A zone beyond its tier's reach cap gives way to nearer fresh structure, so "To Supply/Demand" tracks price.
+//   - Spent (mitigated) zones are hidden by default; if kept, they stop where they broke and lose their label.
+//   - Golden Line and Moving Line no longer bridge from the prior session or across warm-up.
+//   v2.2 CLEANUP
+//   - Sweep × markers are CONFIRMED by default: the × prints on the bar that closes beyond the
+//     sweep bar's high (demand) / low (supply) within N bars, once per level area per session.
+//     Confirmation reduces repeated probes; it is not evidence of profitable entries.
+//     Untick "Confirmed Sweeps Only" for raw markers.
+//   - New same-side zones respect "Min Zone Spacing x ATR" at creation. Existing zones
+//     stay fixed as ATR changes; projections that cannot fit inside the reach cap are skipped.
+//   - Opening-range high / low drawn as key-level rails (ORH / ORL) once the range completes.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BALU ZONE SCALPER — adaptive zone map + descriptive path history
+// ═══════════════════════════════════════════════════════════════════════════════
+// Rebuilt so the read is available WHILE the move happens, not after it.
+//
+//   1) ZONE MAP
+//        → Supply/demand bands are drawn from a LIVE POOL of confirmed levels:
+//          chart-timeframe swings (fast — they confirm in a few bars), plus
+//          higher-timeframe swings, prior-day H/L/C and the opening range as
+//          slower context. Nearby levels MERGE into one averaged level instead
+//          of stacking into three near-identical zones (no strength is tracked).
+//        → The map is maintained every confirmed bar, so a trend day always has
+//          a next zone beyond price instead of running off the end of a map that
+//          was frozen at the open.
+//        → Reach caps apply to EVERY tier. When no real structure sits inside the
+//          cap, the zone is drawn as PROJECTED (dotted, labelled "proj") so a
+//          measured offset is never mistaken for an actual level.
+//
+//   2) MOVING LINE
+//        → Session-anchored estimated cumulative delta. The plotted line is scaled
+//          into the session price range, which changes over time. Divergence uses
+//          the raw series, not the changing visual scale. The opening bars are
+//          suppressed while the scale has too little range.
+//        → On an index feed with no usable volume this is a range-weighted PROXY
+//          for pressure, not true bid/ask delta. It is labelled as such.
+//
+//   3) GOLDEN LINE
+//        → Price anchor with a hysteresis band. Direction persists inside the band;
+//          the regime is neutral when direction and the line's slope disagree.
+//
+//   PATH HISTORY
+//        Only transitions with real zones on both sides start an episode. Barriers
+//        are frozen at entry; the next 1..H bars are observed, never the entry bar.
+//        Only one episode is active globally; transitions while busy are skipped.
+//        The resolved-only share excludes timeouts, so the panel also shows bounds
+//        over ALL finished episodes. These are accounting bounds, NOT confidence
+//        intervals. Serial dependence and state selection prevent an iid Wilson
+//        interval or an effective-sample-size claim. No validated edge is displayed.
+//        The infinite-horizon distance formula is NOT a finite-horizon baseline.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §1 INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Zone Map ────────────────────────────────────────────────────────────────────
+grpZone = "1) Zone Map"
+showZones    = input.bool(true,  "Show Zones", group=grpZone)
+sessionStr   = input.session("0915-1530", "Trading Session", group=grpZone, tooltip="Defines the session used for the day open, the opening range and every session-anchored series.")
+swingLen     = input.int(3, "Swing Strength (chart TF)", minval=1, maxval=10, group=grpZone, tooltip="Bars each side to confirm a CHART-timeframe swing. This is the fast structure source: it confirms in this many bars, so the map tracks today's move instead of yesterday's.")
+zoneTiers    = input.int(2, "Zones Per Side", minval=1, maxval=4, group=grpZone, tooltip="How many live supply and demand zones to keep beyond price at all times.")
+zoneThickATR = input.float(0.35, "Zone Thickness x ATR", minval=0.05, maxval=2.0, step=0.05, group=grpZone, tooltip="Half-height of a zone in CHART-timeframe ATR, so a zone stays narrower than the move you are trading.")
+capBaseATR   = input.float(2.5, "Tier 1 Reach Cap x ATR", minval=0.5, maxval=20.0, step=0.5, group=grpZone, tooltip="The first zone may never sit further than this from price.")
+capStepATR   = input.float(2.5, "Extra Reach Per Tier x ATR", minval=0.5, maxval=20.0, step=0.5, group=grpZone, tooltip="Each further tier may add this much reach. Caps apply to EVERY tier, not only the first.")
+orMinutes    = input.int(15, "Opening Range Minutes", minval=1, maxval=120, group=grpZone, tooltip="The opening-range high and low are added to the level pool as candidate zones.")
+dedupeATR    = input.float(0.50, "Merge Levels Within x ATR", minval=0.05, maxval=3.0, step=0.05, group=grpZone, tooltip="Levels closer than this are merged into ONE level at their average price, instead of stacking into several near-identical zones. Merging does not make a level stronger.")
+minSpaceATR  = input.float(1.0, "Min Zone Spacing x ATR", minval=0.0, maxval=5.0, step=0.1, group=grpZone, tooltip="Minimum center-to-center spacing when a new zone is added, against all live zones on that side. Existing levels stay fixed as ATR changes. A projected tier is omitted if spacing would exceed its reach cap. 0 disables the extra ATR spacing, not the zone-thickness gap.")
+pruneATR     = input.float(14.0, "Forget Levels Beyond x ATR", minval=3.0, maxval=60.0, step=1.0, group=grpZone)
+keepMitigated = input.bool(false, "Keep Mitigated Zones Visible", group=grpZone, tooltip="On = a spent zone stays on the chart, dimmed and ending where it broke. Off (v2.1 default) = it is removed, to reduce clutter.")
+showZoneLbl  = input.bool(true,  "Show Zone Labels", group=grpZone)
+
+// ── Higher-Timeframe Context ────────────────────────────────────────────────────
+grpHtf = "2) Higher-Timeframe Context"
+useHtfLevels = input.bool(true, "Add HTF Swings To Level Pool", group=grpHtf, tooltip="HTF swings are strong but confirm slowly, so here they are ONE input to the pool rather than the only source of the map.")
+htfMode      = input.string("Auto", "HTF Source", options=["Auto", "15m", "30m", "1H", "2H", "4H", "Daily"], group=grpHtf)
+htfPivotLen  = input.int(2, "HTF Swing Strength", minval=1, maxval=10, group=grpHtf, tooltip="Lower = faster confirmation. A 30m HTF at strength 2 confirms in about an hour; at strength 3 it takes 90 minutes or more.")
+
+// ── Golden Line ─────────────────────────────────────────────────────────────────
+grpGold = "3) Golden Line"
+showGold     = input.bool(true,  "Show Golden Line", group=grpGold)
+goldSource   = input.string("VWAP (session)", "Golden Line Source", options=["VWAP (session)", "Daily Pivot (PP)", "EMA"], group=grpGold, tooltip="Default is session VWAP, a moving fair-value line. Daily Pivot is a single static level for the day; EMA is a smooth trend anchor.")
+goldEmaLen   = input.int(50, "EMA Length (if EMA)", minval=5, maxval=400, group=grpGold)
+goldDeadATR  = input.float(0.25, "Regime Deadband x ATR", minval=0.0, maxval=2.0, step=0.05, group=grpGold, tooltip="Price must clear the line by this much to flip direction. Inside the band the last direction is retained (hysteresis); regime also checks the line's slope.")
+goldTint     = input.bool(false, "Tint Background by Regime", group=grpGold)
+goldProxy    = input.bool(false, "No Chart Volume: Use Proxy Symbol Volume", group=grpGold, tooltip="Off = equal-bar session TWAP when the chart has no volume, e.g. NSE:NIFTY spot. On = weight spot prices by another symbol's volume, not that symbol's VWAP. Neither mode establishes predictive edge.")
+goldProxySym = input.symbol("NSE:NIFTY1!", "Proxy Volume Symbol", group=grpGold)
+
+// ── Moving Line (Cumulative Delta) ──────────────────────────────────────────────
+grpCVD = "4) Moving Line"
+showCVD      = input.bool(true,  "Show Moving Line", group=grpCVD)
+cvdSource    = input.string("Auto", "Delta Source", options=["Auto", "Real Volume", "Price Action"], group=grpCVD, tooltip="Auto uses real volume when the feed supplies it, else a range-weighted proxy. On an index feed this is a PROXY for pressure, not true bid/ask delta.")
+flowWarmBars = input.int(10, "Minimum Bars Before Plotting", minval=2, maxval=120, group=grpCVD, tooltip="Suppresses the opening bars, where a session-anchored rescale has too little range to carry information.")
+flowSmoothLen = input.int(5, "Flow Smoothing", minval=1, maxval=50, group=grpCVD)
+flowSlopeLen = input.int(5, "Flow Slope Lookback", minval=1, maxval=50, group=grpCVD, tooltip="Flow direction is the smoothed delta summed over this many bars, not a single-bar tick. v2 builds it from per-bar delta so the daily reset of the line cannot create a fake move.")
+flowDead     = input.float(0.30, "Flow Neutral Deadband", minval=0.0, maxval=2.0, step=0.05, group=grpCVD, tooltip="The slope must exceed this many standard deviations to read RISING or FALLING. Inside the band flow reads FLAT.")
+showDiv      = input.bool(true,  "Detect Divergence", group=grpCVD)
+divPivotLen  = input.int(5, "Divergence Pivot Lookback", minval=2, maxval=20, group=grpCVD, tooltip="A divergence can only be known this many bars AFTER the swing, so it is drawn on the bar where it became known.")
+
+// ── Intrabar Pressure ───────────────────────────────────────────────────────────
+grpFoot = "5) Intrabar Pressure"
+showFootprint = input.bool(true, "Show Intrabar Pressure", group=grpFoot, tooltip="Marks candles whose lower-timeframe flow was strongly one-sided. This is intrabar pressure — it is not evidence of institutional activity.")
+fpLtf         = input.timeframe("1", "Intrabar Resolution", group=grpFoot, tooltip="Must be STRICTLY lower than the chart timeframe. On a 1-minute chart there is nothing to look inside, and the reading is suppressed.")
+fpMinSubBars  = input.int(3, "Minimum Sub-Bars", minval=2, maxval=60, group=grpFoot, tooltip="If fewer sub-bars are returned the reading is suppressed rather than reported from a one-bar sample.")
+fpImbal       = input.float(0.50, "Imbalance Threshold", minval=0.1, maxval=0.95, step=0.01, group=grpFoot, tooltip="Net signed effort as a fraction of total effort. Each sub-bar is weighted by its CLOSE POSITION, not merely its colour.")
+fpEffMult     = input.float(1.3, "Min Effort x Average", minval=0.5, maxval=5.0, step=0.1, group=grpFoot)
+fpEffLen      = input.int(20, "Effort Average Lookback", minval=5, maxval=100, group=grpFoot)
+fpAtZoneOnly  = input.bool(true, "Only Mark at Zones", group=grpFoot)
+fpMarkTraps   = input.bool(true, "Mark Zone Sweeps", group=grpFoot)
+sweepConfOnly = input.bool(true, "Confirmed Sweeps Only", group=grpFoot, tooltip="v2.2: a sweep (wick through a zone edge, close back inside) only prints its × when a later bar closes beyond the sweep bar's high (demand) / low (supply) within the bars below, and only once per zone per session. The × sits on the CONFIRMING bar. Off = v2.1 raw markers on the sweep bar.")
+sweepConfBars = input.int(3, "Sweep Confirm Within Bars", minval=1, maxval=20, group=grpFoot)
+
+// ── Path History ────────────────────────────────────────────────────────────────
+grpProb = "6) Path History (not a forecast)"
+useProb      = input.bool(true, "Measure Path History", group=grpProb, tooltip="One episode on a confirmed state change with real zones on both sides, only when no other episode is active. Resolution does not restart an unchanged state. Counts are not independent evidence.")
+probHorizon  = input.int(20, "Resolution Horizon (bars)", minval=3, maxval=200, group=grpProb, tooltip="Inspect the next 1..H bars, including bar H. No hit by H is a timeout. Both sides on one bar are ambiguous. A session boundary censors any unfinished episode.")
+probMinN     = input.int(100, "Minimum Finished Episodes To Show %", minval=5, maxval=1000, group=grpProb, tooltip="A display threshold only, NOT an effective sample size or a guarantee of statistical significance. Counts remain visible below it; no calibrated forecast or confidence interval is claimed.")
+
+// ── Key Levels ──────────────────────────────────────────────────────────────────
+grpKey = "7) Key Levels"
+showKeyLevels = input.bool(true,  "Show Key Levels", group=grpKey)
+klPDHL        = input.bool(true,  "Prior-Day High / Low", group=grpKey)
+klPDC         = input.bool(true,  "Prior-Day Close", group=grpKey)
+klPivot       = input.bool(false, "Daily Pivot (PP / R1 / S1)", group=grpKey)
+klOR          = input.bool(true,  "Opening Range High / Low", group=grpKey, tooltip="Drawn as ORH / ORL once the 'Opening Range Minutes' window has closed.")
+klORClr       = input.color(color.new(#ff9800, 0), "Opening Range Color", group=grpKey)
+klHLClr       = input.color(color.new(#00bcd4, 0), "PDH / PDL / PDC Color", group=grpKey)
+klPivClr      = input.color(color.new(#7e57c2, 0), "Pivot Color", group=grpKey)
+
+// ── Panel ───────────────────────────────────────────────────────────────────────
+grpRead = "8) Panel"
+showPanel    = input.bool(true,  "Show Panel", group=grpRead)
+panelPos     = input.string("Top Right", "Panel Position", options=["Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"], group=grpRead)
+zoneProxATR  = input.float(0.35, "Zone Proximity x ATR", minval=0.05, maxval=2.0, step=0.05, group=grpRead, tooltip="How close price must be to a zone to count as 'at' it.")
+
+// ── Colors ──────────────────────────────────────────────────────────────────────
+grpClr = "9) Colors"
+supplyClr = input.color(color.new(#ef5350, 0), "Supply", group=grpClr)
+demandClr = input.color(color.new(#26a69a, 0), "Demand", group=grpClr)
+goldClr   = input.color(color.new(#ffa726, 0), "Golden Line", group=grpClr)
+cvdUpClr  = input.color(color.new(#26c281, 0), "Moving Line Up", group=grpClr)
+cvdDnClr  = input.color(color.new(#e74c3c, 0), "Moving Line Down", group=grpClr)
+neutralClr = input.color(color.new(#9e9e9e, 0), "Neutral", group=grpClr)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §2 CORE SERIES
+// ═══════════════════════════════════════════════════════════════════════════════
+atr      = ta.atr(14)
+rangeBar = math.max(high - low, syminfo.mintick)
+tfMin    = math.max(timeframe.in_seconds() / 60.0, 1.0)
+isIntraday = timeframe.isintraday
+
+// The session input now actually drives the day, so pre/post-market bars cannot
+// seed the opening range or reset the delta.
+inSession    = isIntraday ? not na(time(timeframe.period, sessionStr)) : true
+newTradingDay = timeframe.change("D")
+isNewSession = isIntraday ? (inSession and (not inSession[1] or newTradingDay)) : newTradingDay
+sessionEnds = isIntraday and inSession and (session.islastbar or na(time(timeframe.period, sessionStr, bars_back=-1)))
+
+// Prior-day H/L/C — non-repainting idiom (completed previous day via [1] + lookahead).
+[pdH, pdL, pdC] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+// Prior-day floor-trader pivots (the "daily levels" — different every day).
+pp = (pdH + pdL + pdC) / 3.0
+r1 = 2 * pp - pdL
+s1 = 2 * pp - pdH
+
+// ── Session anchors ─────────────────────────────────────────────────────────────
+var float orHigh  = na
+var float orLow   = na
+var float sessHi  = na
+var float sessLo  = na
+var int   dayLen  = 0
+orBars = math.max(1, math.ceil(orMinutes / tfMin))
+
+if isNewSession
+    orHigh  := high
+    orLow   := low
+    sessHi  := high
+    sessLo  := low
+    dayLen  := 1
+else if inSession
+    dayLen += 1
+    sessHi := math.max(nz(sessHi, high), high)
+    sessLo := math.min(nz(sessLo, low), low)
+    if dayLen <= orBars
+        orHigh := math.max(nz(orHigh, high), high)
+        orLow  := math.min(nz(orLow, low), low)
+
+// ── Structure sources ───────────────────────────────────────────────────────────
+// Chart-timeframe swings confirm in swingLen bars — minutes, not hours. This is
+// what keeps the map current; HTF swings are slower context, not the only source.
+sPH = ta.pivothigh(high, swingLen, swingLen)
+sPL = ta.pivotlow(low, swingLen, swingLen)
+
+autoHtfRes = tfMin <= 3 ? "15" : tfMin <= 5 ? "30" : tfMin <= 15 ? "60" : tfMin <= 60 ? "240" : "D"
+htfRes = htfMode == "15m" ? "15" : htfMode == "30m" ? "30" : htfMode == "1H" ? "60" : htfMode == "2H" ? "120" : htfMode == "4H" ? "240" : htfMode == "Daily" ? "D" : autoHtfRes
+if barstate.isfirst and useHtfLevels and timeframe.in_seconds(htfRes) <= timeframe.in_seconds()
+    runtime.error("HTF Source must be strictly higher than the chart timeframe.")
+// v2: read the swing from the previous COMPLETED HTF bar ([1] + lookahead_on). The value is
+// then fixed for the whole HTF bar and identical live and on reload (v1 could repaint).
+htfPH = request.security(syminfo.tickerid, htfRes, ta.pivothigh(htfPivotLen, htfPivotLen)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+htfPL = request.security(syminfo.tickerid, htfRes, ta.pivotlow(htfPivotLen, htfPivotLen)[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+htfNewBar = timeframe.change(htfRes)
+
+// ── Level pool ──────────────────────────────────────────────────────────────────
+// One pool of candidate levels. Levels within the merge tolerance combine into a
+// single level instead of stacking into several near-identical zones.
+var array<float> lvlPrice  = array.new<float>()
+var array<bool>  lvlIsHigh = array.new<bool>()
+
+f_addLevel(_p, _isHigh) =>
+    if not na(_p) and _p > 0 and not na(atr) and atr > 0
+        float tol = atr * dedupeATR
+        int hit = -1
+        if lvlPrice.size() > 0
+            for i = 0 to lvlPrice.size() - 1
+                if lvlIsHigh.get(i) == _isHigh and math.abs(lvlPrice.get(i) - _p) <= tol
+                    hit := i
+                    break
+        if hit >= 0
+            lvlPrice.set(hit, (lvlPrice.get(hit) + _p) / 2.0)
+        else
+            lvlPrice.push(_p)
+            lvlIsHigh.push(_isHigh)
+
+f_prunePool() =>
+    if lvlPrice.size() > 0 and not na(atr) and atr > 0
+        float far = atr * pruneATR
+        for i = lvlPrice.size() - 1 to 0
+            if math.abs(lvlPrice.get(i) - close) > far
+                lvlPrice.remove(i)
+                lvlIsHigh.remove(i)
+    while lvlPrice.size() > 60
+        lvlPrice.shift()
+        lvlIsHigh.shift()
+
+if barstate.isconfirmed
+    f_addLevel(sPH, true)
+    f_addLevel(sPL, false)
+    if useHtfLevels and htfNewBar
+        f_addLevel(htfPH, true)
+        f_addLevel(htfPL, false)
+    if isNewSession
+        f_addLevel(pdH, true)
+        f_addLevel(pdL, false)
+        f_addLevel(pdC, true)
+        f_addLevel(pdC, false)
+    if dayLen == orBars + 1
+        f_addLevel(orHigh, true)
+        f_addLevel(orLow, false)
+    f_prunePool()
+
+// Nearest pooled level above / below a reference (at least _gap from it), skipping any
+// level within _space of a zone already on that side.
+f_nearestAbove(_ref, _gap, _used, _space) =>
+    float best = na
+    if lvlPrice.size() > 0
+        for i = 0 to lvlPrice.size() - 1
+            float v = lvlPrice.get(i)
+            if v > _ref + _gap and (na(best) or v < best)
+                bool taken = false
+                if _used.size() > 0
+                    for j = 0 to _used.size() - 1
+                        if math.abs(_used.get(j) - v) <= _space
+                            taken := true
+                            break
+                if not taken
+                    best := v
+    best
+
+f_nearestBelow(_ref, _gap, _used, _space) =>
+    float best = na
+    if lvlPrice.size() > 0
+        for i = 0 to lvlPrice.size() - 1
+            float v = lvlPrice.get(i)
+            if v < _ref - _gap and (na(best) or v > best)
+                bool taken = false
+                if _used.size() > 0
+                    for j = 0 to _used.size() - 1
+                        if math.abs(_used.get(j) - v) <= _space
+                            taken := true
+                            break
+                if not taken
+                    best := v
+    best
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §3 GOLDEN LINE  (regime with hysteresis)
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2: session-anchored weighted average with a no-volume fallback. On an index feed
+// (volume 0) ta.vwap is na, which froze Regime at NEUTRAL in v1. Weights: chart volume
+// if the feed has it, else proxy-symbol volume (optional), else 1 per bar (= TWAP).
+var bool volSeen = false
+volSeen := volSeen or (not na(volume) and volume > 0)
+goldProxyVol = request.security(goldProxySym, timeframe.period, volume, gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+var float gChartPV = 0.0
+var float gChartW = 0.0
+var float gProxyPV = 0.0
+var float gProxyW = 0.0
+var float gSumP  = 0.0
+var int   gCnt   = 0
+if isNewSession
+    gChartPV := 0.0
+    gChartW := 0.0
+    gProxyPV := 0.0
+    gProxyW := 0.0
+    gSumP  := 0.0
+    gCnt   := 0
+if inSession
+    gChartPV += hlc3 * nz(volume)
+    gChartW += nz(volume)
+    gProxyPV += hlc3 * nz(goldProxyVol)
+    gProxyW += nz(goldProxyVol)
+    gSumP += hlc3
+    gCnt += 1
+vwapVal = gChartW > 0 ? gChartPV / gChartW : goldProxy and gProxyW > 0 ? gProxyPV / gProxyW : gCnt > 0 ? gSumP / gCnt : na
+goldAnchorTxt = goldSource == "Daily Pivot (PP)" ? "Daily PP" : goldSource == "EMA" ? "EMA" : gChartW > 0 ? "VWAP" : goldProxy and gProxyW > 0 ? "Proxy weighted" : goldProxy ? "Proxy unavailable: TWAP" : "TWAP (no vol)"
+goldVal = goldSource == "VWAP (session)" ? vwapVal : goldSource == "Daily Pivot (PP)" ? pp : ta.ema(close, goldEmaLen)
+
+// Direction is retained inside the deadband; reset it with the session anchor.
+goldDead = atr * goldDeadATR
+var int goldState = 0
+if isNewSession
+    goldState := 0
+if close > goldVal + goldDead
+    goldState := 1
+else if close < goldVal - goldDead
+    goldState := -1
+
+goldSlope = dayLen > flowSlopeLen ? goldVal - goldVal[flowSlopeLen] : 0.0
+regimeIdx = goldState > 0 ? (goldSlope >= 0 ? 2 : 1) : goldState < 0 ? (goldSlope <= 0 ? 0 : 1) : 1
+regimeTxt = regimeIdx == 2 ? "BULL" : regimeIdx == 0 ? "BEAR" : "NEUTRAL"
+regimeClr = regimeIdx == 2 ? demandClr : regimeIdx == 0 ? supplyClr : neutralClr
+
+// v2.1: break the line at each session open instead of drawing a diagonal from yesterday's value.
+plot(showGold and not (isIntraday and isNewSession) ? goldVal : na, "Golden Line", color=goldClr, linewidth=2, style=plot.style_linebr)
+bgcolor(goldTint and isIntraday ? color.new(regimeClr, 94) : na, title="Regime Tint")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §4 MOVING LINE  (session cumulative delta)
+// ═══════════════════════════════════════════════════════════════════════════════
+useRealVol = cvdSource == "Real Volume" or (cvdSource == "Auto" and volSeen)
+closePos   = (close - low) / rangeBar
+deltaSize  = useRealVol ? nz(volume) : rangeBar
+barDelta   = deltaSize * (2 * closePos - 1)
+
+var float cvd = 0.0
+if inSession
+    cvd := isNewSession ? barDelta : cvd + barDelta
+
+// Session-anchored extremes: the rescale window only grows within the day, so the
+// line cannot whipsaw across the pane the way a short rolling window does.
+var float cvdHi = na
+var float cvdLo = na
+cvdHi := isNewSession ? cvd : math.max(nz(cvdHi, cvd), cvd)
+cvdLo := isNewSession ? cvd : math.min(nz(cvdLo, cvd), cvd)
+
+cvdSpan   = math.max(cvdHi - cvdLo, 1e-9)
+priceSpan = math.max(nz(sessHi, high) - nz(sessLo, low), syminfo.mintick)
+flowReady = dayLen >= flowWarmBars and (cvdHi - cvdLo) > 0
+
+// A per-bar rescale, not a fixed transformation across time. Divergence uses raw cvd.
+movingLine = nz(sessLo, low) + (cvd - cvdLo) / cvdSpan * priceSpan
+
+// Smooth per-bar changes instead of a reset cumulative series. Normalized pressure,
+// not a mean-centred z-score or a statistical significance test.
+cvdSlope  = math.sum(ta.ema(barDelta, flowSmoothLen), flowSlopeLen)
+slopeSd   = ta.stdev(cvdSlope, 100)
+flowZ     = slopeSd > 0 ? cvdSlope / slopeSd : 0.0
+flowState = flowZ > flowDead ? 1 : flowZ < -flowDead ? -1 : 0
+flowTxt   = flowState > 0 ? "RISING" : flowState < 0 ? "FALLING" : "FLAT"
+flowClr   = flowState > 0 ? cvdUpClr : flowState < 0 ? cvdDnClr : neutralClr
+
+plot(showCVD and flowReady ? movingLine : na, "Moving Line", color=flowClr, linewidth=2, style=plot.style_steplinebr)
+
+// ── Divergence ────────────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, divPivotLen, divPivotLen)
+pl = ta.pivotlow(low, divPivotLen, divPivotLen)
+
+var float lastPH    = na
+var float lastPHcvd = na
+var float lastPL    = na
+var float lastPLcvd = na
+
+if isNewSession
+    lastPH    := na
+    lastPHcvd := na
+    lastPL    := na
+    lastPLcvd := na
+
+bearDiv = false
+bullDiv = false
+if showDiv and barstate.isconfirmed and dayLen > divPivotLen * 2 and not na(ph)
+    float curCvd = cvd[divPivotLen]
+    if not na(lastPH) and ph > lastPH and curCvd < lastPHcvd
+        bearDiv := true
+    lastPH    := ph
+    lastPHcvd := curCvd
+if showDiv and barstate.isconfirmed and dayLen > divPivotLen * 2 and not na(pl)
+    float curCvd = cvd[divPivotLen]
+    if not na(lastPL) and pl < lastPL and curCvd > lastPLcvd
+        bullDiv := true
+    lastPL    := pl
+    lastPLcvd := curCvd
+
+// Drawn on the bar where the divergence became knowable, not back on the swing,
+// so the chart never implies the read was available earlier than it was.
+plotshape(bearDiv, "Bearish Divergence", style=shape.triangledown, location=location.abovebar, color=supplyClr, size=size.tiny)
+plotshape(bullDiv, "Bullish Divergence", style=shape.triangleup,   location=location.belowbar, color=demandClr, size=size.tiny)
+// ═══════════════════════════════════════════════════════════════════════════════
+// §5 ZONE MAP  (maintained continuously — always a next zone beyond price)
+// ═══════════════════════════════════════════════════════════════════════════════
+type Zone
+    box   bx
+    label lb
+    float top
+    float bot
+    float center
+    bool  isDemand
+    bool  isProjected
+    bool  mitigated
+
+var array<Zone> zones = array.new<Zone>()
+
+f_dropZone(_i) =>
+    Zone z = zones.get(_i)
+    if not na(z.bx)
+        box.delete(z.bx)
+    if not na(z.lb)
+        label.delete(z.lb)
+    zones.remove(_i)
+
+f_makeZone(_center, _isDemand, _projected) =>
+    float half = math.max(atr * zoneThickATR, syminfo.mintick * 4)
+    float zt = _center + half
+    float zb = _center - half
+    color baseClr = _isDemand ? demandClr : supplyClr
+    box bx = na
+    label lb = na
+    if showZones
+        bx := box.new(bar_index, zt, bar_index, zb, border_color=color.new(baseClr, _projected ? 55 : 25), bgcolor=color.new(baseClr, _projected ? 90 : 80), border_width=1, border_style=_projected ? line.style_dotted : line.style_solid, xloc=xloc.bar_index, extend=extend.right)
+        if showZoneLbl
+            lb := label.new(bar_index, _center, (_isDemand ? "Demand" : "Supply") + (_projected ? " (proj)" : ""), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(baseClr, _projected ? 60 : 30), textcolor=color.white, size=size.small)
+    zones.push(Zone.new(bx, lb, zt, zb, _center, _isDemand, _projected, false))
+
+// Housekeeping: mark spent zones, retire far ones, and let a projected zone give
+// way as soon as real structure is confirmed.
+structureChanged = not na(sPH) or not na(sPL)
+if barstate.isconfirmed and zones.size() > 0 and not na(atr) and atr > 0
+    float far = atr * pruneATR
+    for i = zones.size() - 1 to 0
+        Zone z = zones.get(i)
+        if not z.mitigated
+            bool through = z.isDemand ? close < z.bot : close > z.top
+            if through
+                z.mitigated := true
+                if not na(z.bx)
+                    box.set_bgcolor(z.bx, color.new(color.gray, 88))
+                    box.set_border_color(z.bx, color.new(color.gray, 55))
+                    box.set_border_style(z.bx, line.style_dotted)
+                    // v2.1: a spent zone ends where it broke instead of extending across the chart.
+                    box.set_extend(z.bx, extend.none)
+                    box.set_right(z.bx, bar_index)
+                if not na(z.lb)
+                    label.delete(z.lb)
+                    z.lb := na
+        bool stale = z.isProjected and not z.mitigated and structureChanged
+        if stale or (z.mitigated and not keepMitigated) or math.abs(z.center - close) > far
+            f_dropZone(i)
+
+// Rebuild whichever side is short, so a trend day never runs off the end of its map.
+if barstate.isconfirmed and not na(atr) and atr > 0 and (not isIntraday or inSession)
+    float gap = math.max(atr * zoneThickATR * 2.0, atr * 0.25)
+    // v2.2: same-side spacing, checked against EVERY live zone on that side (including one price is inside).
+    float space = math.max(gap, atr * minSpaceATR)
+    array<float> usedUp = array.new<float>()
+    array<float> usedDn = array.new<float>()
+    array<float> spaceUp = array.new<float>()
+    array<float> spaceDn = array.new<float>()
+    int haveUp = 0
+    int haveDn = 0
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            Zone z = zones.get(i)
+            if not z.mitigated
+                if z.isDemand
+                    spaceDn.push(z.center)
+                else
+                    spaceUp.push(z.center)
+                if not z.isDemand and z.bot > close
+                    haveUp += 1
+                    usedUp.push(z.center)
+                if z.isDemand and z.top < close
+                    haveDn += 1
+                    usedDn.push(z.center)
+    // v2.1: when the farthest live zone sits beyond its tier's reach cap, a fresh real level nearer
+    // to price replaces it. Before, old far zones could fill every tier while new structure near
+    // price was ignored ("To Demand 163").
+    if haveUp >= zoneTiers
+        float candUp = f_nearestAbove(close, gap, spaceUp, space)
+        float farUp = usedUp.max()
+        if not na(candUp) and candUp < farUp and farUp - close > atr * (capBaseATR + capStepATR * (haveUp - 1))
+            for i = zones.size() - 1 to 0
+                Zone z = zones.get(i)
+                if not z.mitigated and not z.isDemand and z.center == farUp
+                    f_dropZone(i)
+                    break
+            usedUp.remove(usedUp.indexof(farUp))
+            spaceUp.remove(spaceUp.indexof(farUp))
+            haveUp -= 1
+    if haveDn >= zoneTiers
+        float candDn = f_nearestBelow(close, gap, spaceDn, space)
+        float farDn = usedDn.min()
+        if not na(candDn) and candDn > farDn and close - farDn > atr * (capBaseATR + capStepATR * (haveDn - 1))
+            for i = zones.size() - 1 to 0
+                Zone z = zones.get(i)
+                if not z.mitigated and z.isDemand and z.center == farDn
+                    f_dropZone(i)
+                    break
+            usedDn.remove(usedDn.indexof(farDn))
+            spaceDn.remove(spaceDn.indexof(farDn))
+            haveDn -= 1
+    if haveUp < zoneTiers
+        for k = haveUp to zoneTiers - 1
+            float cap  = atr * (capBaseATR + capStepATR * k)
+            float cand = f_nearestAbove(close, gap, spaceUp, space)
+            bool  proj = na(cand) or (cand - close) > cap
+            float lvl  = proj ? close + cap : cand
+            // Only a projected zone is pushed beyond existing tiers; a real level stays at its price.
+            if proj and spaceUp.size() > 0
+                lvl := math.max(lvl, spaceUp.max() + space)
+            if not proj or lvl <= close + cap
+                f_makeZone(lvl, false, proj)
+                usedUp.push(lvl)
+                spaceUp.push(lvl)
+    if haveDn < zoneTiers
+        for k = haveDn to zoneTiers - 1
+            float cap  = atr * (capBaseATR + capStepATR * k)
+            float cand = f_nearestBelow(close, gap, spaceDn, space)
+            bool  proj = na(cand) or (close - cand) > cap
+            float lvl  = proj ? close - cap : cand
+            if proj and spaceDn.size() > 0
+                lvl := math.min(lvl, spaceDn.min() - space)
+            if not proj or lvl >= close - cap
+                f_makeZone(lvl, true, proj)
+                usedDn.push(lvl)
+                spaceDn.push(lvl)
+
+// Labels ride the right edge so they stay readable.
+if zones.size() > 0
+    for i = 0 to zones.size() - 1
+        Zone z = zones.get(i)
+        if not na(z.lb)
+            label.set_x(z.lb, bar_index)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §5b KEY LEVELS  (hard prior-day / pivot lines — the reference's cyan levels)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Separate from the soft supply/demand bands: single, firm horizontal lines the
+// market reacts to (prior-day high/low/close and, optionally, the floor pivots).
+// Rebuilt once per session and extended right, so they sit as fixed reference rails.
+var array<line>  klLines  = array.new<line>()
+var array<label> klLabels = array.new<label>()
+
+f_clearKeys() =>
+    if klLines.size() > 0
+        for i = 0 to klLines.size() - 1
+            line.delete(klLines.get(i))
+        klLines.clear()
+    if klLabels.size() > 0
+        for i = 0 to klLabels.size() - 1
+            label.delete(klLabels.get(i))
+        klLabels.clear()
+
+f_keyLevel(_price, _txt, _clr, _style) =>
+    if not na(_price)
+        line ln = line.new(bar_index, _price, bar_index + 1, _price, color=_clr, width=1, style=_style, extend=extend.right, xloc=xloc.bar_index)
+        klLines.push(ln)
+        label lb = label.new(bar_index, _price, _txt, style=label.style_label_left, color=color.new(_clr, 25), textcolor=color.white, size=size.small, xloc=xloc.bar_index)
+        klLabels.push(lb)
+
+// Rebuild the day's rails at each new session.
+if showKeyLevels and isIntraday and isNewSession
+    f_clearKeys()
+    if klPDHL
+        f_keyLevel(pdH, "PDH", klHLClr, line.style_solid)
+        f_keyLevel(pdL, "PDL", klHLClr, line.style_solid)
+    if klPDC
+        f_keyLevel(pdC, "PDC", klHLClr, line.style_dotted)
+    if klPivot
+        f_keyLevel(pp, "PP", klPivClr, line.style_dashed)
+        f_keyLevel(r1, "R1", klPivClr, line.style_dashed)
+        f_keyLevel(s1, "S1", klPivClr, line.style_dashed)
+
+// v2.2: opening-range rails, drawn once the range is complete (cleared with the day's other rails).
+if showKeyLevels and isIntraday and klOR and inSession and dayLen == orBars and barstate.isconfirmed
+    f_keyLevel(orHigh, "ORH", klORClr, line.style_dashed)
+    f_keyLevel(orLow, "ORL", klORClr, line.style_dashed)
+
+// Ride the key-level labels to the right edge so they stay readable.
+if klLabels.size() > 0
+    for i = 0 to klLabels.size() - 1
+        label.set_x(klLabels.get(i), bar_index)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §6 LOCATION  (where price sits in the live map)
+// ═══════════════════════════════════════════════════════════════════════════════
+float prox = atr * zoneProxATR
+bool atDemand = false
+bool atSupply = false
+float tapDemandBot = na
+float tapSupplyTop = na
+float tapDemandC = na
+float tapSupplyC = na
+float nextUp = na
+float nextDn = na
+bool nextUpProjected = false
+bool nextDnProjected = false
+if zones.size() > 0
+    for i = 0 to zones.size() - 1
+        Zone z = zones.get(i)
+        if not z.mitigated
+            if close <= z.top + prox and close >= z.bot - prox
+                if z.isDemand
+                    atDemand := true
+                    tapDemandBot := z.bot
+                    tapDemandC := z.center
+                else
+                    atSupply := true
+                    tapSupplyTop := z.top
+                    tapSupplyC := z.center
+            if not z.isDemand and z.bot > close and (na(nextUp) or z.bot < nextUp)
+                nextUp := z.bot
+                nextUpProjected := z.isProjected
+            if z.isDemand and z.top < close and (na(nextDn) or z.top > nextDn)
+                nextDn := z.top
+                nextDnProjected := z.isProjected
+
+locIdx = atDemand ? 0 : atSupply ? 2 : 1
+locTxt = atDemand ? "AT DEMAND" : atSupply ? "AT SUPPLY" : "MID"
+locClr = atDemand ? demandClr : atSupply ? supplyClr : neutralClr
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §6b INTRABAR PRESSURE
+// ═══════════════════════════════════════════════════════════════════════════════
+// Each sub-bar contributes signed effort weighted by its CLOSE POSITION, so a small
+// candle with one-sided internals still registers while a large two-sided candle
+// does not. When the feed returns too few sub-bars to judge (for example a 1-minute
+// sub-bar request on a 1-minute chart) the reading is suppressed rather than
+// reported from a degenerate one-bar sample.
+
+ltfSigned = request.security_lower_tf(syminfo.tickerid, fpLtf, ((high - low) > 0 ? (2 * close - high - low) / (high - low) : 0.0) * (nz(volume) > 0 ? volume : (high - low)), ignore_invalid_timeframe=true)
+ltfEffort = request.security_lower_tf(syminfo.tickerid, fpLtf, nz(volume) > 0 ? volume : (high - low), ignore_invalid_timeframe=true)
+
+float fpNet = 0.0
+float fpTot = 0.0
+int   fpN   = 0
+if not na(ltfEffort) and ltfEffort.size() > 0
+    fpN := ltfEffort.size()
+    for i = 0 to fpN - 1
+        fpTot += nz(ltfEffort.get(i))
+if not na(ltfSigned) and ltfSigned.size() > 0
+    for i = 0 to ltfSigned.size() - 1
+        fpNet += nz(ltfSigned.get(i))
+
+fpValid = showFootprint and timeframe.in_seconds(fpLtf) < timeframe.in_seconds() and fpN >= fpMinSubBars and fpTot > 0
+float fpAvg = ta.sma(fpTot, fpEffLen)
+fpImbNow = fpTot > 0 ? fpNet / fpTot : 0.0
+fpBig    = fpValid and (na(fpAvg) or fpTot >= fpAvg * fpEffMult)
+
+pressBuy  = fpBig and fpImbNow >=  fpImbal and (not fpAtZoneOnly or atDemand)
+pressSell = fpBig and fpImbNow <= -fpImbal and (not fpAtZoneOnly or atSupply)
+
+// Sweep markers: price takes a zone edge then closes back through it.
+fpUpWick = (high - math.max(open, close)) / rangeBar
+fpDnWick = (math.min(open, close) - low) / rangeBar
+sweepDemand = not na(tapDemandBot) and low  < tapDemandBot and close > tapDemandBot and fpDnWick >= 0.2
+sweepSupply = not na(tapSupplyTop) and high > tapSupplyTop and close < tapSupplyTop and fpUpWick >= 0.2
+
+// v2.2: confirmed sweeps. A sweep is only PENDING until a later bar (within sweepConfBars) closes
+// beyond the sweep bar's high (demand) / low (supply). A close back through the zone, or running
+// out of bars, cancels it. Each zone can confirm once per session.
+f_farFromAll(array<float> _arr, float _v, float _tol) =>
+    bool isFar = true
+    if _arr.size() > 0
+        for i = 0 to _arr.size() - 1
+            if math.abs(_arr.get(i) - _v) <= _tol
+                isFar := false
+                break
+    isFar
+
+var float swDC   = na
+var float swDBot = na
+var float swDX   = na
+var int   swDBar = na
+var float swSC   = na
+var float swSTop = na
+var float swSX   = na
+var int   swSBar = na
+var array<float> swDoneD = array.new<float>()
+var array<float> swDoneS = array.new<float>()
+if isNewSession
+    swDBar := na
+    swSBar := na
+    swDoneD.clear()
+    swDoneS.clear()
+bool sweepDemandConf = false
+bool sweepSupplyConf = false
+if not na(swDBar)
+    if close < swDBot or bar_index - swDBar > sweepConfBars
+        swDBar := na
+    else if close > swDX
+        sweepDemandConf := true
+        swDoneD.push(swDC)
+        swDBar := na
+if not na(swSBar)
+    if close > swSTop or bar_index - swSBar > sweepConfBars
+        swSBar := na
+    else if close < swSX
+        sweepSupplyConf := true
+        swDoneS.push(swSC)
+        swSBar := na
+if sweepDemand and na(swDBar) and not na(atr) and f_farFromAll(swDoneD, tapDemandC, atr * 0.7)
+    swDC   := tapDemandC
+    swDBot := tapDemandBot
+    swDX   := high
+    swDBar := bar_index
+if sweepSupply and na(swSBar) and not na(atr) and f_farFromAll(swDoneS, tapSupplyC, atr * 0.7)
+    swSC   := tapSupplyC
+    swSTop := tapSupplyTop
+    swSX   := low
+    swSBar := bar_index
+markSweepD = sweepConfOnly ? sweepDemandConf : sweepDemand
+markSweepS = sweepConfOnly ? sweepSupplyConf : sweepSupply
+
+plotshape(pressBuy and barstate.isconfirmed,  "Buy Pressure",  style=shape.circle, location=location.belowbar, color=demandClr, size=size.tiny)
+plotshape(pressSell and barstate.isconfirmed, "Sell Pressure", style=shape.circle, location=location.abovebar, color=supplyClr, size=size.tiny)
+plotshape(showFootprint and fpMarkTraps and markSweepD and barstate.isconfirmed, "Demand Sweep", style=shape.xcross, location=location.belowbar, color=demandClr, size=size.tiny)
+plotshape(showFootprint and fpMarkTraps and markSweepS and barstate.isconfirmed, "Supply Sweep", style=shape.xcross, location=location.abovebar, color=supplyClr, size=size.tiny)
+
+// v2: bar-close versions (final) + separate EARLY versions on the forming bar (may cancel).
+alertcondition(pressBuy and barstate.isconfirmed,  "Buy Pressure (bar close)",  "Intrabar flow strongly one-sided up at a demand zone (bar closed).")
+alertcondition(pressSell and barstate.isconfirmed, "Sell Pressure (bar close)", "Intrabar flow strongly one-sided down at a supply zone (bar closed).")
+alertcondition(pressBuy and not barstate.isconfirmed,  "EARLY Buy Pressure (may cancel)",  "Forming bar shows one-sided buying at demand. Not final until the bar closes.")
+alertcondition(pressSell and not barstate.isconfirmed, "EARLY Sell Pressure (may cancel)", "Forming bar shows one-sided selling at supply. Not final until the bar closes.")
+alertcondition(showFootprint and fpMarkTraps and markSweepD and barstate.isconfirmed, "Demand Sweep (bar close)", "Demand zone swept and reclaimed (confirmed if 'Confirmed Sweeps Only' is on). Context, not a trade signal.")
+alertcondition(showFootprint and fpMarkTraps and markSweepS and barstate.isconfirmed, "Supply Sweep (bar close)", "Supply zone swept and rejected (confirmed if 'Confirmed Sweeps Only' is on). Context, not a trade signal.")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §6c PATH HISTORY  (descriptive, not a trading probability)
+// ═══════════════════════════════════════════════════════════════════════════════
+// One global episode prevents overlapping future windows across buckets too.
+// Resolution alone never creates an observation. A transition while busy or without
+// real barriers is skipped, not queued for when conditions become convenient.
+stateId = regimeIdx * 9 + (flowState + 1) * 3 + locIdx
+
+var array<int> hitUp = array.new<int>(27, 0)
+var array<int> hitDn = array.new<int>(27, 0)
+var array<int> timedOut = array.new<int>(27, 0)
+var array<int> bothHit = array.new<int>(27, 0)
+var array<int> sessionCut = array.new<int>(27, 0)
+var array<int> sampleDays = array.new<int>(27, 0)
+var array<int> lastSampleDay = array.new<int>(27, na)
+var int prevState = na
+var int pState = na
+var float pUp = na
+var float pDn = na
+var int pBar = na
+
+if useProb and barstate.isconfirmed
+    // Never use tomorrow's opening gap to resolve yesterday's unfinished episode.
+    if not na(pState) and (isNewSession or not inSession)
+        sessionCut.set(pState, sessionCut.get(pState) + 1)
+        pState := na
+    if isNewSession or not inSession
+        prevState := na
+    if not na(pState)
+        bool up = high >= pUp
+        bool dn = low <= pDn
+        bool done = true
+        if up and dn
+            bothHit.set(pState, bothHit.get(pState) + 1)
+        else if up
+            hitUp.set(pState, hitUp.get(pState) + 1)
+        else if dn
+            hitDn.set(pState, hitDn.get(pState) + 1)
+        else if bar_index - pBar >= probHorizon
+            timedOut.set(pState, timedOut.get(pState) + 1)
+        else if sessionEnds
+            sessionCut.set(pState, sessionCut.get(pState) + 1)
+        else
+            done := false
+        if done
+            pState := na
+    bool changed = not na(prevState) and stateId != prevState
+    bool realBarriers = not na(nextUp) and not na(nextDn) and nextDn < close and close < nextUp and not nextUpProjected and not nextDnProjected
+    if inSession and not sessionEnds and changed and realBarriers and na(pState)
+        pState := stateId
+        pUp := nextUp
+        pDn := nextDn
+        pBar := bar_index
+        int sampleDay = time("D")
+        if na(lastSampleDay.get(stateId)) or lastSampleDay.get(stateId) != sampleDay
+            sampleDays.set(stateId, sampleDays.get(stateId) + 1)
+            lastSampleDay.set(stateId, sampleDay)
+    if inSession
+        prevState := stateId
+
+// Keep the statistical bucket fixed during a forming bar.
+statsState = barstate.isconfirmed ? stateId : nz(stateId[1], stateId)
+nUp = hitUp.get(statsState)
+nDn = hitDn.get(statsState)
+nTimeout = timedOut.get(statsState)
+nBoth = bothHit.get(statsState)
+nCut = sessionCut.get(statsState)
+nResolved = nUp + nDn
+nFinished = nResolved + nTimeout + nBoth + nCut
+nPending = not na(pState) and pState == statsState ? 1 : 0
+resolvedShare = nResolved > 0 ? 100.0 * nUp / nResolved : na
+// Bounds on the historical within-H up-first share: timeouts are known non-hits;
+// both-hit bars and session cuts can be either up-first or not. Pending is separate.
+historyLo = nFinished > 0 ? 100.0 * nUp / nFinished : na
+historyHi = nFinished > 0 ? 100.0 * (nUp + nBoth + nCut) / nFinished : na
+probReady = useProb and nFinished >= probMinN
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §7 PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+panelAnchor = switch panelPos
+    "Top Left"      => position.top_left
+    "Top Center"    => position.top_center
+    "Top Right"     => position.top_right
+    "Bottom Left"   => position.bottom_left
+    "Bottom Center" => position.bottom_center
+    => position.bottom_right
+
+var table panel = table.new(panelAnchor, 2, 13, border_width=1)
+f_row(_t, _r, _k, _v, _vclr) =>
+    table.cell(_t, 0, _r, _k, text_color=color.white, text_size=size.small, bgcolor=color.new(color.black, 20), text_halign=text.align_left)
+    table.cell(_t, 1, _r, _v, text_color=_vclr,       text_size=size.small, bgcolor=color.new(color.black, 20), text_halign=text.align_right)
+
+if showPanel and barstate.islast
+    f_row(panel, 0, "Regime", regimeTxt, regimeClr)
+    f_row(panel, 1, useRealVol ? "Flow (volume proxy)" : "Flow (range proxy)", flowTxt, flowClr)
+    f_row(panel, 2, "Location", locTxt, locClr)
+    string upTxt = na(nextUp) ? "—" : str.tostring(math.round(nextUp - close, 1)) + (nextUpProjected ? " (proj)" : "")
+    string dnTxt = na(nextDn) ? "—" : str.tostring(math.round(close - nextDn, 1)) + (nextDnProjected ? " (proj)" : "")
+    f_row(panel, 3, "To Supply", upTxt, supplyClr)
+    f_row(panel, 4, "To Demand", dnTxt, demandClr)
+    string nTxt = useProb ? str.tostring(nFinished) + " done / " + str.tostring(nPending) + " open / " + str.tostring(sampleDays.get(statsState)) + " days" : "OFF"
+    f_row(panel, 5, "History (closed state)", nTxt, neutralClr)
+    string countTxt = useProb ? str.tostring(nUp) + " / " + str.tostring(nDn) + " / " + str.tostring(nTimeout) + " / " + str.tostring(nBoth) + " / " + str.tostring(nCut) : "—"
+    f_row(panel, 6, "Up / Dn / Timeout / Both / Cut", countTxt, neutralClr)
+    string pTxt = not useProb ? "OFF" : probReady and nResolved >= probMinN ? str.tostring(resolvedShare, "0") + "% (n=" + str.tostring(nResolved) + ")" : "Too few resolved episodes"
+    f_row(panel, 7, "Up first | resolved only", pTxt, neutralClr)
+    string boundsTxt = not useProb ? "OFF" : probReady ? str.tostring(historyLo, "0") + ".." + str.tostring(historyHi, "0") + "% (not a CI)" : "Too few finished episodes"
+    f_row(panel, 8, "Up by H | history bounds", boundsTxt, neutralClr)
+    f_row(panel, 9, "Forecast / edge / effective n", "Not established", neutralClr)
+    f_row(panel, 10, "Divergence", bearDiv ? "BEARISH" : bullDiv ? "BULLISH" : "—", bearDiv ? supplyClr : bullDiv ? demandClr : neutralClr)
+    string fpTxt = not fpValid ? "n/a (LTF unavailable/invalid)" : pressBuy ? (barstate.isconfirmed ? "BUY" : "BUY?") : pressSell ? (barstate.isconfirmed ? "SELL" : "SELL?") : "—"
+    f_row(panel, 11, "Pressure | Gold", fpTxt + " | " + goldAnchorTxt, pressBuy ? demandClr : pressSell ? supplyClr : neutralClr)
+    f_row(panel, 12, "Sampling", "Transitions; real zones; H=" + str.tostring(probHorizon), neutralClr)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §8 ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Regime alerts fire on the hysteresis flip, not on every touch of the line.
+// v2: all of these are evaluated on the bar close so they cannot fire and then un-happen.
+goldFlipUp = regimeIdx == 2 and regimeIdx[1] != 2
+goldFlipDn = regimeIdx == 0 and regimeIdx[1] != 0
+alertcondition(goldFlipUp and barstate.isconfirmed, "Regime Turned Bullish", "Golden Line direction and slope agree bullish (bar closed).")
+alertcondition(goldFlipDn and barstate.isconfirmed, "Regime Turned Bearish", "Golden Line direction and slope agree bearish (bar closed).")
+alertcondition(bearDiv and barstate.isconfirmed, "Bearish Divergence", "Higher swing high on weaker cumulative delta (bar closed).")
+alertcondition(bullDiv and barstate.isconfirmed, "Bullish Divergence", "Lower swing low on stronger cumulative delta (bar closed).")

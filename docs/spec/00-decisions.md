@@ -1,0 +1,30 @@
+# Decisions (tie-breakers). Change only on user instruction; log changes in STATE.
+
+- **D01 Provider.** Zerodha Kite is the only live/historical provider (user-confirmed). Replaces Dhan everywhere, including `reference/src/*`. `MarketDataProvider` adapters: `csv_replay`, `kite`.
+- **D02 Backend.** FastAPI. Quant core `nifty.*` (engines, execution, analytics) has no HTTP/ORM imports.
+- **D03 Storage.** Postgres + TimescaleDB is the source of truth. Redis only for pub/sub and cache; losing Redis loses no audit data.
+- **D04 Engine ids** (separate versions, params, results; never mixed): `pine.nvs_scalper`, `pine.balu_zone`, `research.distance_entry_v1`.
+- **D05 One schema source.** Pydantic → OpenAPI → generated TS types; engine `Params` → JSON Schema → UI forms. One Bar and Event envelope for all engines (`docs/spec/01-contracts.md`).
+- **D06 Execution.** Signal on closed bar t → fill at open of t+1. Modes `tv` (default for Pine ports) and `conservative` (default for research). One shared `resolve_barriers` (`docs/spec/03-execution.md`).
+- **D07 Jobs.** Postgres `jobs` table + worker polling with `FOR UPDATE SKIP LOCKED`. Idempotency key = engine + version + config_hash + snapshot_id + range.
+- **D08 Bars.** Store 1m (+ticks when the collector runs). Other TFs = session-anchored (09:15 IST) resampling, never across sessions; 1D = session.
+- **D09 Calendar.** User-maintained `data/calendar.yml` → versioned table. Never guess NSE holidays; if absent assume weekdays and raise `calendar_unverified`.
+- **D10 Instrument facts** (expiry, strike, lot size, tick size, strike step) come only from the Kite instrument master, stored versioned daily. Never hardcode 50/75/25.
+- **D11 Greeks.** Kite supplies none → compute Black-Scholes locally, label `computed`, or show `n/a`.
+- **D12 Option backtests** only on contracts the collector recorded. Kite lists only live contracts; expired-contract history is verified in C07, assumed absent. Never synthesize option prices from index candles.
+- **D13 Charts.** Lightweight Charts with custom series primitives for zones/labels/drawings (verify the installed version's API). ECharts for analytics only. Highcharts excluded (licence).
+- **D14 Engines** are incremental state machines (`on_bar`); batch = loop over incremental. Invariants: batch == incremental == restart/replay; prefix-immunity (no lookahead).
+- **D15 `pinekit`** provides Pine primitives with Pine semantics (`docs/spec/04-pine-parity.md`). No general Pine transpiler. `na` ≡ NaN; NaN-propagating max/min.
+- **D16 Parity tiers** A (series) / B (signals) / C (trades). Oracle priority: TradingView golden export > PineTS (optional, NVS only) > Python twin. Deviations are logged.
+- **D17 Auth.** Single user, password hash in env, httpOnly cookie session, bind 127.0.0.1. `user_id` column (default 1) on user-scoped tables.
+- **D18 Research outputs** carry status `experimental|watch|paper`. No invented probabilities. "Edge not established" is a valid result.
+- **D19 Live safety.** Read-only endpoint allowlist; a test greps our code for order endpoints. Kite access token stays server-side (encrypted at rest), never in the frontend, logs or URLs. Never automate the Kite login (no stored credentials/TOTP); the user logs in daily.
+- **D20 Volume kinds** `exchange|absent|synthetic|proxy`. Index spot has no volume → anchor = TWAP (labelled). Proxy volume comes from the front-month future chosen from the instrument master.
+- **D21 Time.** UTC internally, Asia/Kolkata at the edges; `bar_start` inclusive, `bar_end` exclusive; signals only from finalized bars; provisional events are flagged.
+- **D22 Python.** `requires-python >=3.12`. Docker image `python:3.14-slim` to match the local venv; fall back to 3.13 with a logged deviation. Local venv path lives in AGENTS.md and the gitignored `Makefile.local` only.
+- **D23 Tools.** Capability-based policy in `docs/TOOLS.md`; project `make` tools are the sanctioned verification path; no order-capable tool/MCP attached.
+- **D24 Dependencies** are pinned via lockfiles; add only what the chunk lists.
+- **D25 Pine fidelity.** Pine source is authoritative. Port maps guide; deviations go to STATE and the engine doc.
+- **D26 Frontend.** React + TypeScript on Vite (SPA), TanStack Query, Zustand. No SSR (supersedes "Next.js").
+- **D27 Hot path.** Engines run on plain floats/dataclasses per bar; pandas/numpy only for import, resampling, analytics and tests.
+- **D28 Kite client.** Thin own client: `httpx` (REST) + `websockets` (binary WS parser). The `kiteconnect` SDK is not a dependency (pins 2019-era autobahn/Twisted; reactor/asyncio mismatch). Flip only on user request.

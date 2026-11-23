@@ -1,0 +1,358 @@
+//@version=6
+// ══════════════════════════════════════════════════════════════════════════
+// NIFTY VWAP-SPREAD SCALPER  (TradingView twin of selfhosted/vwap_scalper.py)
+// ══════════════════════════════════════════════════════════════════════════
+// Same causal rules as the Python engine: signals are made on a CLOSED bar and filled at the NEXT
+// bar's open. Run it on a 5-minute NIFTY chart (NSE:NIFTY1! for a real VWAP, see the note below).
+//
+//   Base rules (reference image):  long = RSI >= 60 and close > VWAP   |   short = RSI <= 40 and close < VWAP
+//   Added "spread" gates:          how FAR  = (close - VWAP) / ATR     |   how FAST = change of that over N bars
+//   Added trend / quality gates:   EMA 9 vs 21, fresh RSI cross, candle close location, VWAP-chop filter, cost gate
+//   Stop = signal candle low/high (clamped by ATR), target 1.5R, breakeven after +1R, exit on VWAP loss / stall / RSI fade.
+//   RSI is optional (enabled by default): turn it off to bypass RSI entry checks and the RSI-fade exit only.
+//
+// INDEX HAS NO VOLUME: on NSE:NIFTY the VWAP falls back to an equal-weight session average (TWAP, shown in the
+// table). Use the Nifty future (NSE:NIFTY1!) for a true volume-weighted VWAP.
+//
+// COSTS: Properties > Commission is preset to 0.0125 % per side (= 2.5 bps round trip, ~6 pts at 25,000), the
+// same as the Python default. If you change "Round-trip cost (bps)" below, set Commission to bps / 200 (% per side).
+// Order size is 1 unit, so the Strategy Tester shows P&L in index points; change it in Properties > Order size.
+//
+// DIFFERENCES vs the Python backtest (TradingView's broker emulator decides these):
+//   * Stop / target are the prices printed on the BUY/SELL label (anchored to the signal bar close). Python re-anchors
+//     the target to the actual next-open fill and skips the trade if that open gaps too far; here the fill is taken as is.
+//   * If one bar touches both stop and target, TradingView guesses the path (open > high > low > close when the high is
+//     closer to the open); Python always assumes the stop was hit first. Enable the bar magnifier for a truer answer.
+//   * EMA is seeded with an SMA (Python seeds with the first close); the difference vanishes after ~100 bars.
+// Live use: the script only advises. Add an alert on "Any alert() function call" for BUY / SELL / EXIT messages.
+
+strategy(
+     title                   = "Nifty VWAP-Spread Scalper",
+     shorttitle              = "NVS Scalper",
+     overlay                 = true,
+     max_lines_count         = 500,
+     max_labels_count        = 500,
+     initial_capital         = 100000,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.0125,
+     pyramiding              = 0,
+     margin_long             = 0,
+     margin_short            = 0,
+     calc_on_every_tick      = false,
+     process_orders_on_close = false)
+
+// ── Inputs ────────────────────────────────────────────────────────────────
+G_TRD = "Trend & momentum"
+emaFastLen   = input.int(9,  "EMA fast",  minval = 1, group = G_TRD)
+emaSlowLen   = input.int(21, "EMA slow",  minval = 2, group = G_TRD)
+useRsi       = input.bool(true, "Use RSI (entries and exits)", group = G_TRD,
+     tooltip = "On: require RSI levels and a fresh cross, and allow RSI-fade exits. Off: bypass all RSI checks; other rules stay active. Changing this recalculates chart history. Recreate alerts after changing it.")
+rsiLen       = input.int(14, "RSI length", minval = 2, group = G_TRD)
+atrLen       = input.int(14, "ATR length", minval = 2, group = G_TRD)
+rsiLong      = input.float(60.0, "RSI long level",  group = G_TRD)
+rsiShort     = input.float(40.0, "RSI short level", group = G_TRD)
+rsiCrossBars = input.int(3, "RSI fresh-cross window (bars)", minval = 1, group = G_TRD,
+     tooltip = "RSI must have been on the other side of its level within this many bars (a fresh cross, not a stale one).")
+
+G_SPR = "Spread from VWAP (how far / how fast)"
+minDevAtr    = input.float(0.25, "Min distance from VWAP (ATR)", minval = 0.0, step = 0.05, group = G_SPR,
+     tooltip = "Far enough from VWAP to be a real move.")
+maxDevAtr    = input.float(1.6,  "Max distance from VWAP (ATR)", minval = 0.1, step = 0.05, group = G_SPR,
+     tooltip = "Not so far that we are chasing.")
+speedBars    = input.int(3, "Speed window (bars)", minval = 1, group = G_SPR)
+minSpeedAtr  = input.float(0.35, "Min speed (ATR over the window)", minval = 0.0, step = 0.05, group = G_SPR,
+     tooltip = "The spread must have widened by at least this much (in ATR) over the speed window.")
+closePosMin  = input.float(0.6, "Close location in candle", minval = 0.5, maxval = 1.0, step = 0.05, group = G_SPR,
+     tooltip = "Long: close in the top (1 - x) of the bar. Short: in the bottom (1 - x).")
+chopBars     = input.int(20, "Chop window (bars)", minval = 3, group = G_SPR)
+maxVwapFlips = input.int(3, "Max VWAP side flips in window", minval = 0, group = G_SPR,
+     tooltip = "More flips than this means price is ping-ponging around VWAP: no trade.")
+
+G_RSK = "Risk & targets"
+minRiskAtr   = input.float(0.7, "Min stop distance (ATR)", minval = 0.1, step = 0.05, group = G_RSK)
+maxRiskAtr   = input.float(1.8, "Max stop distance (ATR) - skip if wider", minval = 0.2, step = 0.05, group = G_RSK)
+targetR      = input.float(1.5, "Target (R)", minval = 0.2, step = 0.1, group = G_RSK)
+beR          = input.float(1.0, "Move stop to breakeven after (R)", minval = 0.2, step = 0.1, group = G_RSK)
+beOffsetR    = input.float(0.05, "Breakeven offset (R, on top of costs)", minval = 0.0, step = 0.05, group = G_RSK)
+maxHoldBars  = input.int(15, "Max bars in trade", minval = 1, group = G_RSK)
+
+G_EXT = "Signal exits (acted on at the next open)"
+exitVwapBufAtr = input.float(0.1, "VWAP-loss buffer (ATR)", minval = 0.0, step = 0.05, group = G_EXT)
+extAtr         = input.float(2.0, "Stretch-stall distance (ATR)", minval = 0.5, step = 0.1, group = G_EXT)
+rsiExit        = input.float(50.0, "RSI fade level", group = G_EXT)
+
+G_CST = "Costs"
+costBps      = input.float(2.5, "Round-trip cost (bps of price)", minval = 0.0, step = 0.1, group = G_CST,
+     tooltip = "Brokerage + STT + fees + slippage. Keep Properties > Commission at bps / 200 (% per side).")
+minTgtCostX  = input.float(2.5, "Target must be >= x * cost", minval = 0.0, step = 0.5, group = G_CST)
+
+G_SES = "Session & limits (IST, HHMM)"
+entryStartHM = input.int(930,  "Entries from (bar end)",  minval = 915, maxval = 1530, group = G_SES)
+entryEndHM   = input.int(1445, "Entries until (bar end)", minval = 915, maxval = 1530, group = G_SES)
+flatHM       = input.int(1515, "Square off at (bar end)", minval = 915, maxval = 1530, group = G_SES)
+warmupBars   = input.int(30, "Warm-up bars", minval = 1, group = G_SES)
+minSessBars  = input.int(5,  "Min bars into the session", minval = 1, group = G_SES)
+cooldownBars = input.int(2,  "Cool-down bars after an exit", minval = 0, group = G_SES)
+maxTradesDay = input.int(6,  "Max trades per day", minval = 1, group = G_SES)
+maxDayLossR  = input.float(3.0, "Stop trading for the day after (R lost)", minval = 0.5, step = 0.5, group = G_SES)
+
+G_DSP = "Display"
+allowLong    = input.bool(true, "Allow BUY",  group = G_DSP)
+allowShort   = input.bool(true, "Allow SELL", group = G_DSP)
+showLabels   = input.bool(true, "BUY / SELL labels", group = G_DSP)
+showExitLbl  = input.bool(true, "Exit labels (reason and R)", group = G_DSP)
+showBands    = input.bool(true, "Spread zones around VWAP", group = G_DSP,
+     tooltip = "Green band = BUY distance zone, red band = SELL distance zone (min to max distance in ATR).")
+showLevels   = input.bool(true, "Active stop / target lines", group = G_DSP)
+showTable    = input.bool(true, "Dashboard", group = G_DSP)
+
+// ── Constants & helpers ──────────────────────────────────────────────────
+IST = "Asia/Kolkata"
+color C_BUY  = #1b9e4b
+color C_SELL = #d03a2f
+color C_VWAP = #f59e0b
+
+toMin(int hm) => math.floor(hm / 100) * 60 + hm % 100
+
+int entryStartMin = toMin(entryStartHM)
+int entryEndMin   = toMin(entryEndHM)
+int flatMin       = toMin(flatHM)
+
+if not timeframe.isintraday
+    runtime.error("Nifty VWAP-Spread Scalper needs an intraday chart (5-minute recommended).")
+
+// ── State ────────────────────────────────────────────────────────────────
+var int    dir         = 0       // 0 flat, +1 long, -1 short: set on the signal bar, cleared once the trade is over
+var bool   waitFill    = false   // entry order sent, fill expected at the next open
+var float  curStop     = na
+var float  curTP       = na
+var float  curRisk     = na
+var bool   beOn        = false
+var float  mfe         = 0.0
+var int    holdBars    = 0
+var int    tradesToday = 0
+var float  rToday      = 0.0
+var int    sinceExit   = 1000
+var int    prevClosed  = 0
+var int    prevSide    = 0
+var float  cumPV       = 0.0
+var float  cumV        = 0.0
+var float  cumTP       = 0.0
+var int    nSess       = 0
+
+int dirStart = dir
+
+// ── Session clock ────────────────────────────────────────────────────────
+tfMs    = timeframe.in_seconds(timeframe.period) * 1000
+barEnd  = time + tfMs
+endMin  = hour(barEnd, IST) * 60 + minute(barEnd, IST)
+inSess  = not na(time(timeframe.period, "0915-1530", IST))
+newSess = inSess and (barstate.isfirst or timeframe.change("D") or not inSess[1])
+
+// ── Indicators ───────────────────────────────────────────────────────────
+// ATR: the first bar of each session uses high - low (no overnight gap), exactly like the Python engine.
+float trSess = newSess or na(close[1]) ? high - low : math.max(high - low, math.abs(high - close[1]), math.abs(low - close[1]))
+float atr    = ta.rma(trSess, atrLen)
+float rsi    = ta.rsi(close, rsiLen)
+float emaF   = ta.ema(close, emaFastLen)
+float emaS   = ta.ema(close, emaSlowLen)
+
+// Session VWAP of hlc3; equal-weight (TWAP) when the instrument reports no volume.
+if newSess
+    cumPV := 0.0
+    cumV  := 0.0
+    cumTP := 0.0
+    nSess := 0
+    prevSide := 0
+if inSess
+    float v = nz(volume)
+    nSess += 1
+    cumTP += hlc3
+    if v > 0
+        cumPV += hlc3 * v
+        cumV  += v
+bool  weighted = cumV > 0
+float vwap     = weighted ? cumPV / cumV : cumTP / math.max(nSess, 1)
+
+// ── Spread: how far and how fast ─────────────────────────────────────────
+float dev    = close - vwap
+float devAtr = dev / atr
+float speed  = nSess > speedBars ? devAtr - devAtr[speedBars] : na
+
+int side = dev > 0 ? 1 : dev < 0 ? -1 : 0
+int flipAt = (inSess and side != 0 and prevSide != 0 and side != prevSide) ? 1 : 0
+if inSess and side != 0
+    prevSide := side
+int flips = 0
+for i = 0 to math.max(0, math.min(chopBars - 2, nSess - 1))
+    flips += nz(flipAt[i])
+
+bool rsiWasBelow = false
+bool rsiWasAbove = false
+for i = 1 to rsiCrossBars
+    rsiWasBelow := rsiWasBelow or rsi[i] < rsiLong
+    rsiWasAbove := rsiWasAbove or rsi[i] > rsiShort
+
+float rng = high - low
+float loc = rng > 0 ? (close - low) / rng : 0.5
+
+// ── Closed trades: R accounting, labels, cooldown ────────────────────────
+sinceExit := math.min(sinceExit + 1, 1000)
+int nClosed = strategy.closedtrades
+if nClosed > prevClosed
+    for i = prevClosed to nClosed - 1
+        float ep  = strategy.closedtrades.entry_price(i)
+        float xp  = strategy.closedtrades.exit_price(i)
+        int   sgn = strategy.closedtrades.size(i) > 0 ? 1 : -1
+        float net = (xp - ep) * sgn - ep * costBps / 1e4
+        float r   = curRisk > 0 ? net / curRisk : 0.0
+        rToday += r
+        if showExitLbl
+            string why = strategy.closedtrades.exit_comment(i)
+            label.new(strategy.closedtrades.exit_bar_index(i), xp,
+                 (why == "" ? "EXIT" : why) + " " + str.tostring(math.round(r, 1)) + "R",
+                 style = label.style_label_left, color = color.new(r > 0 ? C_BUY : C_SELL, 10),
+                 textcolor = color.white, size = size.small)
+    prevClosed := nClosed
+    sinceExit := 0
+
+if newSess
+    tradesToday := 0
+    rToday := 0.0
+
+// ── Position bookkeeping ─────────────────────────────────────────────────
+bool  inPos    = strategy.position_size != 0
+float entryPx  = strategy.position_avg_price
+if waitFill
+    waitFill := false
+    if inPos
+        holdBars := 0
+        mfe := 0.0
+        beOn := false
+    else
+        dir := 0           // filled and stopped inside the fill bar, or the order never filled
+else if not inPos
+    dir := 0
+
+if newSess and inPos
+    strategy.close_all(comment = "SESSION_END", immediately = true)
+
+string entryId = dir == 1 ? "BUY" : "SELL"
+string exitReason = ""
+if inPos and dir != 0
+    holdBars += 1
+    mfe := math.max(mfe, dir == 1 ? high - entryPx : entryPx - low)
+    if not beOn and mfe >= beR * curRisk
+        beOn := true
+        float lvl = entryPx + dir * (entryPx * costBps / 1e4 + beOffsetR * curRisk)
+        curStop := dir == 1 ? math.max(curStop, lvl) : math.min(curStop, lvl)
+    if endMin >= flatMin or session.islastbar
+        exitReason := "EOD"
+    else if (close - vwap) * dir < -exitVwapBufAtr * atr
+        exitReason := "VWAP_LOSS"
+    else if devAtr * dir >= extAtr and (close - close[1]) * dir < 0
+        exitReason := "STRETCH_STALL"
+    else if useRsi and ((dir == 1 and rsi < rsiExit) or (dir == -1 and rsi > rsiExit))
+        exitReason := "RSI_FADE"
+    else if holdBars >= maxHoldBars
+        exitReason := "TIME"
+
+    if exitReason != ""
+        // EOD closes on this bar's close; every other reason is executed at the next bar's open.
+        if exitReason == "EOD"
+            strategy.close(entryId, comment = "EOD", immediately = true)
+        else
+            strategy.close(entryId, comment = exitReason)
+        if showExitLbl
+            label.new(bar_index, close, "EXIT\n" + exitReason, style = dir == 1 ? label.style_label_down : label.style_label_up,
+                 color = color.new(C_VWAP, 5), textcolor = color.white, size = size.small)
+        alert((dir == 1 ? "EXIT LONG " : "EXIT SHORT ") + "(" + exitReason + ") Nifty " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+        if exitReason == "EOD"
+            dir := 0
+    else
+        strategy.exit("X", entryId, stop = curStop, limit = curTP, comment_loss = beOn ? "BE_STOP" : "SL", comment_profit = "TP")
+
+// ── Entry signal ─────────────────────────────────────────────────────────
+bool ready = inSess and barstate.isconfirmed and not na(atr) and (not useRsi or not na(rsi)) and not na(devAtr) and not na(speed)
+     and bar_index + 1 >= warmupBars and nSess >= minSessBars
+     and endMin >= entryStartMin and endMin <= entryEndMin and sinceExit >= cooldownBars
+     and tradesToday < maxTradesDay and rToday > -maxDayLossR and flips <= maxVwapFlips
+
+bool longOk = close > vwap and emaF > emaS and (not useRsi or (rsi >= rsiLong and rsiWasBelow))
+     and devAtr >= minDevAtr and devAtr <= maxDevAtr and speed >= minSpeedAtr
+     and close > open and loc >= closePosMin
+bool shortOk = close < vwap and emaF < emaS and (not useRsi or (rsi <= rsiShort and rsiWasAbove))
+     and devAtr <= -minDevAtr and devAtr >= -maxDevAtr and speed <= -minSpeedAtr
+     and close < open and loc <= 1 - closePosMin
+
+int sigDir = 0
+if ready and not inPos and not waitFill and dir == 0
+    sigDir := longOk and allowLong ? 1 : shortOk and allowShort ? -1 : 0
+
+if sigDir != 0
+    float rawRisk = sigDir == 1 ? close - low : high - close
+    float risk    = math.max(rawRisk, minRiskAtr * atr)
+    if rawRisk <= maxRiskAtr * atr and targetR * risk >= minTgtCostX * close * costBps / 1e4
+        dir       := sigDir
+        waitFill  := true
+        curRisk   := risk
+        curStop   := math.round_to_mintick(close - sigDir * risk)
+        curTP     := math.round_to_mintick(close + sigDir * targetR * risk)
+        tradesToday += 1
+        string sideTxt = sigDir == 1 ? "BUY" : "SELL"
+        string rsiWhy = useRsi ? "RSI " + str.tostring(math.round(rsi)) + " crossed " + str.tostring(sigDir == 1 ? rsiLong : rsiShort) : "RSI OFF"
+        string why = rsiWhy + " | " + (weighted ? "VWAP" : "TWAP") + " spread " + str.tostring(math.round(devAtr, 2)) + " ATR ("
+             + str.tostring(math.round(dev, 1)) + " pts) | speed " + str.tostring(math.round(speed, 2)) + " ATR/"
+             + str.tostring(speedBars) + " bars | EMA" + str.tostring(emaFastLen) + (sigDir == 1 ? ">" : "<") + str.tostring(emaSlowLen)
+        strategy.entry(sideTxt, sigDir == 1 ? strategy.long : strategy.short, comment = sideTxt)
+        strategy.exit("X", sideTxt, stop = curStop, limit = curTP, comment_loss = "SL", comment_profit = "TP")
+        if showLabels
+            label.new(bar_index, sigDir == 1 ? low : high,
+                 sideTxt + " " + str.tostring(close, format.mintick) + "\nSL " + str.tostring(curStop, format.mintick)
+                 + "  TP " + str.tostring(curTP, format.mintick),
+                 style = sigDir == 1 ? label.style_label_up : label.style_label_down,
+                 color = sigDir == 1 ? C_BUY : C_SELL, textcolor = color.white, size = size.normal, tooltip = why)
+        alert(sideTxt + " Nifty " + str.tostring(close, format.mintick) + " | SL " + str.tostring(curStop, format.mintick)
+             + " | TP " + str.tostring(curTP, format.mintick) + " | " + why, alert.freq_once_per_bar_close)
+
+// ── Plots ────────────────────────────────────────────────────────────────
+float zoneAtr = showBands and inSess ? atr : na
+plot(inSess ? vwap : na, "VWAP (TWAP if no volume)", color = C_VWAP, linewidth = 2, style = plot.style_linebr)
+plot(emaF, "EMA fast", color = color.new(color.blue, 10))
+plot(emaS, "EMA slow", color = color.new(color.purple, 10))
+buyNear  = plot(vwap + minDevAtr * zoneAtr, "Buy zone near",  color = color.new(C_BUY, 80),  style = plot.style_linebr)
+buyFar   = plot(vwap + maxDevAtr * zoneAtr, "Buy zone far",   color = color.new(C_BUY, 80),  style = plot.style_linebr)
+sellNear = plot(vwap - minDevAtr * zoneAtr, "Sell zone near", color = color.new(C_SELL, 80), style = plot.style_linebr)
+sellFar  = plot(vwap - maxDevAtr * zoneAtr, "Sell zone far",  color = color.new(C_SELL, 80), style = plot.style_linebr)
+fill(buyNear, buyFar,   color.new(C_BUY, 92),  "Buy distance zone")
+fill(sellNear, sellFar, color.new(C_SELL, 92), "Sell distance zone")
+
+bool lvlOn = showLevels and (dirStart != 0 or dir != 0)
+plot(lvlOn ? curStop : na, "Stop",   color = C_SELL, style = plot.style_steplinebr)
+plot(lvlOn ? curTP   : na, "Target", color = C_BUY,  style = plot.style_steplinebr)
+
+// ── Dashboard ────────────────────────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 8, border_width = 1, border_color = color.new(color.gray, 60), frame_width = 1, frame_color = color.new(color.gray, 60))
+if showTable and barstate.islast
+    string bias = close > vwap and emaF > emaS ? "BULL" : close < vwap and emaF < emaS ? "BEAR" : "MIXED"
+    string pos  = dir == 1 ? "LONG" : dir == -1 ? "SHORT" : "FLAT"
+    color  bg   = color.new(color.gray, 85)
+    color  tx   = color.new(color.gray, 0)
+    table.cell(tbl, 0, 0, "NVS Scalper " + timeframe.period + "m", text_color = color.white, bgcolor = color.new(C_VWAP, 20), text_halign = text.align_left)
+    table.cell(tbl, 1, 0, weighted ? "VWAP" : "TWAP", text_color = color.white, bgcolor = color.new(C_VWAP, 20))
+    table.cell(tbl, 0, 1, "Spread", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 1, str.tostring(math.round(devAtr, 2)) + " ATR (" + str.tostring(math.round(dev, 1)) + " pts)", text_color = tx, bgcolor = bg)
+    table.cell(tbl, 0, 2, "Speed (" + str.tostring(speedBars) + " bars)", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 2, na(speed) ? "n/a" : str.tostring(math.round(speed, 2)) + " ATR", text_color = tx, bgcolor = bg)
+    table.cell(tbl, 0, 3, useRsi ? "RSI (ON)" : "RSI (OFF)", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 3, na(rsi) ? "n/a" : str.tostring(math.round(rsi, 1)), text_color = tx, bgcolor = bg)
+    table.cell(tbl, 0, 4, "Bias", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 4, bias, text_color = bias == "BULL" ? C_BUY : bias == "BEAR" ? C_SELL : tx, bgcolor = bg)
+    table.cell(tbl, 0, 5, "VWAP flips", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 5, str.tostring(flips) + " / " + str.tostring(maxVwapFlips) + (flips > maxVwapFlips ? "  CHOP" : ""), text_color = tx, bgcolor = bg)
+    table.cell(tbl, 0, 6, "Today", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 6, str.tostring(tradesToday) + " trades, " + str.tostring(math.round(rToday, 1)) + "R", text_color = tx, bgcolor = bg)
+    table.cell(tbl, 0, 7, "Position", text_color = tx, bgcolor = bg, text_halign = text.align_left)
+    table.cell(tbl, 1, 7, pos, text_color = dir == 1 ? C_BUY : dir == -1 ? C_SELL : tx, bgcolor = bg)
