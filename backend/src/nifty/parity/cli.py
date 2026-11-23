@@ -21,10 +21,18 @@ SYMBOL, TICK = (
     0.05,
 )  # oracle dataset facts (docs/SOURCES.md); tick is given, not inferred
 
-SHORT = {"pine.nvs_scalper": "nvs"}
+SHORT = {"pine.nvs_scalper": "nvs", "pine.balu_zone": "balu"}
 
 # TradingView plot titles -> engine plot names (Pine L322-334)
 SERIES: dict[str, dict[str, str]] = {
+    # C09 series (C10/C11 append): the `dbg_<name>` plots of BALU_DEBUG_PLOTS.pine.txt
+    "pine.balu_zone": {
+        "dbg_atr": "atr", "dbg_goldVal": "gold_val", "dbg_goldState": "gold_state",
+        "dbg_regimeIdx": "regime_idx", "dbg_cvd": "cvd", "dbg_movingLine": "moving_line_raw",
+        "dbg_flowZ": "flow_z", "dbg_flowState": "flow_state", "dbg_flowReady": "flow_ready",
+        "dbg_dayLen": "day_len", "dbg_orHigh": "or_high", "dbg_orLow": "or_low",
+        "dbg_poolSize": "pool_size",
+    },
     "pine.nvs_scalper": {
         "VWAP (TWAP if no volume)": "vwap", "EMA fast": "ema_fast", "EMA slow": "ema_slow",
         "Buy zone near": "buy_near", "Buy zone far": "buy_far", "Sell zone near": "sell_near",
@@ -54,7 +62,7 @@ def run_parity(
     from nifty.timeutil import Calendar
 
     load_builtin_engines()
-    spec = get_engine(engine_id)
+    spec = get_engine(engine_id, allow_unready=True)  # parity runs are developer tooling
     cal = Calendar.load()
     tf = spec.cls.default_timeframe
     tfd = timedelta(minutes=int(tf.rstrip("m")))
@@ -68,7 +76,15 @@ def run_parity(
 
     if (gdir / "ohlc_plots.csv").exists():
         rows, cols = load_tv_ohlc_plots(gdir / "ohlc_plots.csv")
-        res = run_batch(engine_id, {}, tv_bars(rows, iid, tf), tf, instrument=inst, calendar=cal)
+        res = run_batch(
+            engine_id,
+            {},
+            tv_bars(rows, iid, tf),
+            tf,
+            instrument=inst,
+            calendar=cal,
+            allow_unready=True,
+        )
         smap = SERIES.get(engine_id, {})
         g = {
             smap[c]: {

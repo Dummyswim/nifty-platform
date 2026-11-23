@@ -1,0 +1,20 @@
+// Balu debug plots for the TradingView golden export (docs/spec/04-pine-parity.md "Golden inputs").
+// Append these lines to the END of a COPY of reference/pine/Balu_Zone_Scalper_v2.pine, with
+// "No Chart Volume: Use Proxy Symbol Volume" OFF, chart NIFTY 50 5m, timezone Exchange (Asia/Kolkata).
+// Keep the copy <= 64 plot*() calls in total. If a series is missing from the export, change its
+// display to display.all. C10 and C11 append their lines below (marked by chunk).
+
+// ---- C09: core, session, level pool, golden line, moving line ---------------------------------
+plot(atr,                   "dbg_atr",       display = display.data_window)
+plot(goldVal,               "dbg_goldVal",   display = display.data_window)
+plot(goldState,             "dbg_goldState", display = display.data_window)
+plot(regimeIdx,             "dbg_regimeIdx", display = display.data_window)
+plot(cvd,                   "dbg_cvd",       display = display.data_window)
+plot(movingLine,            "dbg_movingLine", display = display.data_window)
+plot(flowZ,                 "dbg_flowZ",     display = display.data_window)
+plot(flowState,             "dbg_flowState", display = display.data_window)
+plot(flowReady ? 1 : 0,     "dbg_flowReady", display = display.data_window)
+plot(dayLen,                "dbg_dayLen",    display = display.data_window)
+plot(orHigh,                "dbg_orHigh",    display = display.data_window)
+plot(orLow,                 "dbg_orLow",     display = display.data_window)
+plot(lvlPrice.size(),       "dbg_poolSize",  display = display.data_window)

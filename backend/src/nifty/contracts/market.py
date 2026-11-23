@@ -3,9 +3,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Timeframe = Literal["1m", "3m", "5m", "10m", "15m", "30m", "1h", "1d"]
+Timeframe = Literal["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d"]
 # 1d is one bar per session (length comes from the Calendar), so it is not listed here.
-TF_MINUTES: dict[str, int] = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60}
+TF_MINUTES: dict[str, int] = {
+    "1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240,
+}  # fmt: skip
 VolumeKind = Literal["exchange", "absent", "synthetic", "proxy"]
 QUALITY_FLAGS = frozenset(
     {
