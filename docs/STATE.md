@@ -2,7 +2,7 @@
 
 next_chunk: C08
 last_update: 2026-11-23 (C07)
-env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (key+secret in .env; live UNVERIFIED until you run make kite-smoke)
+env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (live verified 2026-11-23: login, profile, master, 1m candles)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
 | id | status | notes |
@@ -94,7 +94,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
-- Kite live UNVERIFIED: run the steps under Interfaces (Kite API/jobs/CLI) and paste the PASS/FAIL lines. Day limits, plan entitlement and the NIFTY 50 index row in the dump are checked there.
+- Kite live verified 2026-11-23 (make kite-smoke PASS: profile, 4541 NIFTY master rows, 375 1m candles; minute range of 61 days accepted, so the real day limit is above 60 and still unknown; WebSocket entitlement untested until C08). Dev DB has the instrument master and a token that expires 06:00 IST.
 - golden_tv=none: NVS golden not exported yet; `make parity` prints `golden missing` for it. Export steps: RUNBOOK §Golden (user to confirm when files exist).
 - Golden decides (log result in STATE when C03/C09 compare): `ema_seed` (default 'first'), rsi both-zero (100), `pivot_ties` (default), `round_to_mintick` epsilon.
 - Provisional events: the id is the same for every 1m update of one (bar, type, seq) slot, so consumers (C08) must treat a repeated id as 'replace with the latest update'; `available_at_utc` is that update's 1m bar end.

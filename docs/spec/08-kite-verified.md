@@ -29,16 +29,16 @@ Base `https://kite.trade/docs/connect/v3`; tags `verified(<page>, <date>)` name 
 - `GET /instruments/historical/:instrument_token/:interval?from&to[&continuous][&oi]`, `from/to` as `yyyy-mm-dd hh:mm:ss`. verified(/historical/, 2026-11-23)
 - Intervals: `minute 3minute 5minute 10minute 15minute 30minute 60minute day`. verified(/historical/, 2026-11-23)
 - Candle `[ "2017-12-15T09:15:00+0530", o, h, l, c, volume ]`, a 7th element `oi` only with `oi=1`; the offset has no colon. verified(/historical/, 2026-11-23)
-- Maximum days per request per interval is NOT on the page. Working assumption (minute 60, 3/5/10m 100, 15/30m 200, 60m 400, day 2000) is used by the provider and must be confirmed by `make kite-smoke`. unverified
+- Maximum days per request per interval is NOT on the page. Live probe: a minute range of 61 days was accepted (kite-smoke, 2026-11-23), so the 60-day working limit is conservative; the true maximum is not found. Other intervals still assumed (3/5/10m 100, 15/30m 200, 60m 400, day 2000). verified(live kite-smoke, 2026-11-23)
 - `continuous=1` works for NFO/MCX futures day candles through a live contract token; expired options are not retrievable ("unless you regularly download and cache them"). verified(/historical/, 2026-11-23)
 - `/instruments` lists live contracts only, so expired-option history is absent (D12 holds). verified(/historical/, 2026-11-23)
-- Historical and WebSocket need a paid Connect plan. unverified (not stated on the pages)
+- Historical works on this account (375 NIFTY 50 1m candles for 2026-11-23); WebSocket entitlement is checked in C08. verified(live kite-smoke, 2026-11-23)
 
 ## Instruments and quotes
 - `GET /instruments` and `GET /instruments/:exchange` return a gzipped CSV dump, generated once a day (request about 08:30 IST). verified(/market-quotes/, 2026-11-23)
 - Columns in order: `instrument_token, exchange_token, tradingsymbol, name, last_price, expiry, strike, tick_size, lot_size, instrument_type, segment, exchange`. verified(/market-quotes/, 2026-11-23)
 - `instrument_type` EQ, FUT, CE, PE; segments like NFO-FUT, NFO-OPT. Use exchange + tradingsymbol as the key, not the token. verified(/market-quotes/, 2026-11-23)
-- The NIFTY 50 index row (segment INDICES, type empty) and its token come from the dump itself. unverified (not on the pages; the master decides)
+- The NIFTY 50 index row (segment INDICES, NSE) is in the live dump (4541 NIFTY-related rows kept). verified(live kite-smoke, 2026-11-23)
 - `/quote` up to 500 instruments, `/quote/ohlc` and `/quote/ltp` up to 1000; query `i=NSE:NIFTY+50` repeated; missing keys are absent. verified(/market-quotes/, 2026-11-23)
 - `/quote` fields: `instrument_token, timestamp, last_trade_time, last_price, volume, oi, ohlc, depth{buy,sell}[price,quantity,orders]`. verified(/market-quotes/, 2026-11-23)
 
