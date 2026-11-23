@@ -38,7 +38,12 @@ class BaluZoneEngine:
         return f.out
 
     def on_provisional(self, bar: Bar) -> EngineOutput:
-        return EngineOutput()  # pressure only (C11)
+        out = EngineOutput()  # only registered hooks run (pressure); they never mutate engine state
+        for hook in steps.PROVISIONAL:
+            o = hook(self, bar)
+            out.plots.update(o.plots)
+            out.events += o.events
+        return out
 
     def snapshot(self) -> dict[str, Any]:
         return {n: s.state() for n, s in self.slots.items()}

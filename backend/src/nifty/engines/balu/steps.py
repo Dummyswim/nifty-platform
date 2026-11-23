@@ -66,6 +66,8 @@ class BarFrame:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+# on_provisional hooks (C10 pressure): (engine, forming bar) -> EngineOutput; read-only
+PROVISIONAL: list[Callable[[Any, Bar], EngineOutput]] = []
 PLOT_SPECS: list[PlotSpec] = []  # modules append their PlotSpecs (the engine exposes this list)
 Step = Callable[["BaluZoneEngine", BarFrame], None]
 STEPS: dict[int, Step] = {}
@@ -76,6 +78,11 @@ STEP_MODULES: list[str] = [
     "nifty.engines.balu.levels",
     "nifty.engines.balu.golden",
     "nifty.engines.balu.moving_line",
+    "nifty.engines.balu.zones",  # C10: steps 7-12
+    "nifty.engines.balu.keylevels",
+    "nifty.engines.balu.location",
+    "nifty.engines.balu.pressure",
+    "nifty.engines.balu.sweeps",
 ]
 
 
@@ -90,6 +97,11 @@ def step(n: int) -> Callable[[Step], Step]:
         return fn
 
     return deco
+
+
+def provisional(fn: Callable[[Any, Bar], EngineOutput]) -> Callable[[Any, Bar], EngineOutput]:
+    PROVISIONAL.append(fn)
+    return fn
 
 
 def register_slot(

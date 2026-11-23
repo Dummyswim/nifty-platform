@@ -41,13 +41,20 @@ class Harness:
         self.outs: list[EngineOutput] = []
         self.starts: list[datetime] = []
 
-    def day(self, d: date, specs: Sequence[OHLC]) -> list[EngineOutput]:
+    def day(
+        self, d: date, specs: Sequence[OHLC], subs: Sequence[Sequence[OHLC]] | None = None
+    ) -> list[EngineOutput]:
+        """`subs[i]` optionally replaces the default five 1m sub-bars of chart bar i (pressure tests)."""
         open_, _ = CAL.session_bounds(d)
         res = []
         for i, (o, h, lo, c) in enumerate(specs):
             start = open_ + timedelta(minutes=self.mins * i)
-            for m in one_min(start, o, h, lo, c) if self.mins == 5 else []:
-                self.ctx.append_1m(m)
+            if subs is not None and subs[i] is not None:
+                for k, q in enumerate(subs[i]):
+                    self.ctx.append_1m(bar1(start + timedelta(minutes=k), *q, "1m", 1))
+            else:
+                for m in one_min(start, o, h, lo, c) if self.mins == 5 else []:
+                    self.ctx.append_1m(m)
             if self.mins != 5:  # coarser charts: 1m members are flat copies of the bar
                 for k in range(self.mins):
                     self.ctx.append_1m(bar1(start + timedelta(minutes=k), o, h, lo, c, "1m", 1))

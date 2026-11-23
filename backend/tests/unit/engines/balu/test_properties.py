@@ -29,12 +29,17 @@ def bars():  # type: ignore[no-untyped-def]
 
 
 def view(r: RunResult) -> dict[str, object]:
-    return {"plots": r.plots, "events": r.events, "cfg": r.config_hash}
+    return {"plots": r.plots, "events": r.events, "overlays": r.overlays, "cfg": r.config_hash}
 
 
 def test_batch_equals_incremental_and_restart(bars) -> None:  # type: ignore[no-untyped-def]
     batch = run_batch("pine.balu_zone", {}, bars, "5m", **KW)
-    assert len(batch.plots) > 400
+    assert (
+        len(batch.plots) > 400 and len(batch.overlays) > 100
+    )  # zones, rails and markers are emitted
+    assert any(o.kind == "zone" for o in batch.overlays) and any(
+        o.id.startswith("kl:") for o in batch.overlays
+    )
     assert view(run_incremental("pine.balu_zone", {}, bars, "5m", **KW)) == view(batch)
     for cut in (
         7,
@@ -53,7 +58,10 @@ def test_all_documented_outputs_exist_and_not_ready_engine_stays_hidden(bars) ->
     r = run_batch("pine.balu_zone", {}, bars[:2000], "5m", **KW)
     names = set(r.plots[-1][1])
     assert {"atr", "golden", "gold_state", "regime_idx", "cvd", "moving_line", "flow_z", "flow_state",
-            "day_len", "or_high", "or_low", "pool_size"} <= names  # fmt: skip
+            "day_len", "or_high", "or_low", "pool_size", "next_up", "next_dn", "next_up_proj",
+            "next_dn_proj", "loc_idx", "tap_demand_bot", "tap_supply_top", "zones_up", "zones_dn",
+            "zones_size", "fp_n", "fp_tot", "fp_imb", "fp_valid", "press_buy", "press_sell",
+            "sweep_d_conf", "sweep_s_conf"} <= names  # fmt: skip
     assert "pine.balu_zone" not in {e["id"] for e in list_engines()}
     with pytest.raises(EngineNotReady):
         get_engine("pine.balu_zone")

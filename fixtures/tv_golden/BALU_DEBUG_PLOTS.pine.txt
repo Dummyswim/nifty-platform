@@ -18,3 +18,12 @@ plot(dayLen,                "dbg_dayLen",    display = display.data_window)
 plot(orHigh,                "dbg_orHigh",    display = display.data_window)
 plot(orLow,                 "dbg_orLow",     display = display.data_window)
 plot(lvlPrice.size(),       "dbg_poolSize",  display = display.data_window)
+
+// ---- C10: zones, location, intrabar pressure --------------------------------------------------
+plot(nextUp,                "dbg_nextUp",    display = display.data_window)
+plot(nextDn,                "dbg_nextDn",    display = display.data_window)
+plot(locIdx,                "dbg_locIdx",    display = display.data_window)
+plot(fpImbNow,              "dbg_fpImbNow",  display = display.data_window)
+plot(fpTot,                 "dbg_fpTot",     display = display.data_window)
+plot(fpN,                   "dbg_fpN",       display = display.data_window)
+plot(zones.size(),          "dbg_zonesSize", display = display.data_window)
