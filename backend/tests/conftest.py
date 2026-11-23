@@ -72,3 +72,11 @@ def db_conn(migrated_url: str) -> Iterator[Connection]:
         yield conn
         trans.rollback()
     eng.dispose()
+
+
+@pytest.fixture
+def sma_engine() -> Iterator[None]:
+    from tests.sma_cross_engine import registered
+
+    with registered():
+        yield

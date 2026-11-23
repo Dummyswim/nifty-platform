@@ -4,7 +4,10 @@ import sys
 CORE = (
     "nifty.contracts, nifty.timeutil, nifty.engines, nifty.execution, nifty.analytics, "
     "nifty.marketdata.importer, nifty.marketdata.validation, nifty.marketdata.resample, "
-    "nifty.marketdata.providers.csv_replay"
+    "nifty.marketdata.providers.csv_replay, nifty.contracts.engine, nifty.engines.base, "
+    "nifty.engines.context, nifty.engines.runner, nifty.engines.pinekit, "
+    "nifty.engines.pinekit.indicators, nifty.engines.pinekit.session, nifty.execution.barriers, "
+    "nifty.execution.broker"
 )
 BANNED = ["sqlalchemy", "fastapi", "redis", "nifty.api", "nifty.db"]
 

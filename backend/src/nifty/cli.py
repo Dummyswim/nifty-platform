@@ -16,6 +16,15 @@ def _hhmm(dt: datetime) -> str:
     return to_ist(dt).strftime("%H:%M")
 
 
+def session_range(
+    cal: Calendar, from_date: str | None, to_date: str | None
+) -> tuple[datetime | None, datetime | None]:
+    """Inclusive session dates -> [first open, last close) in UTC; None where omitted."""
+    lo = cal.session_bounds(date.fromisoformat(from_date))[0] if from_date else None
+    hi = cal.session_bounds(date.fromisoformat(to_date))[1] if to_date else None
+    return lo, hi
+
+
 def _import_csv(a: argparse.Namespace) -> int:
     from nifty.db.bars import upsert_bars
     from nifty.db.instruments import upsert_instrument
@@ -102,9 +111,8 @@ def _snapshot(a: argparse.Namespace) -> int:
     from nifty.db.bars import create_snapshot
     from nifty.db.session import get_engine
 
-    cal = Calendar.load()
-    start = cal.session_bounds(date.fromisoformat(a.from_date))[0]
-    end = cal.session_bounds(date.fromisoformat(a.to_date))[1]
+    start, end = session_range(Calendar.load(), a.from_date, a.to_date)
+    assert start is not None and end is not None
     with get_engine().begin() as conn:
         ins = _find(conn, a.symbol)
         if ins is None:
@@ -117,6 +125,91 @@ def _snapshot(a: argparse.Namespace) -> int:
     print(f"snapshot_id {s.snapshot_id}\nsha256 {s.sha256}")
     print(f"rows {s.n_rows} · {a.tf} · {a.from_date}..{a.to_date} (inclusive session dates)")
     return 0
+
+
+def run_engine(
+    conn: Connection,
+    *,
+    engine_id: str,
+    symbol: str,
+    timeframe: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    params: str | None = None,
+    persist: bool = True,
+    allow_unready: bool = False,
+) -> list[str]:
+    """Run an engine over stored 1m bars; returns <=15 summary lines. Takes a connection so tests
+    can run it on nifty_test. Only this developer path may run `ready=False` engines."""
+    from nifty.db.bars import create_snapshot, read_bars
+    from nifty.engines.base import EngineNotFound, EngineNotReady, get_engine
+    from nifty.engines.runner import run_batch
+
+    try:
+        spec = get_engine(engine_id, allow_unready)
+    except EngineNotFound:
+        return [f"unknown engine {engine_id!r}"]
+    except EngineNotReady as e:
+        return [f"refused: {e} (use --allow-unready for development)"]
+    ins = _find(conn, symbol)
+    if ins is None:
+        return [f"unknown symbol {symbol!r}; import data first"]
+    cal = Calendar.load()
+    lo, hi = session_range(cal, from_date, to_date)
+    bars = read_bars(conn, ins.instrument_id, "1m", lo, hi)
+    if not bars:
+        return ["no 1m bars in range"]
+    # same bounds as `nifty.cli snapshot`, so both paths yield the same snapshot_id
+    start, end = session_range(
+        cal,
+        from_date or cal.session_date(bars[0].bar_start_utc).isoformat(),
+        to_date or cal.session_date(bars[-1].bar_start_utc).isoformat(),
+    )
+    assert start is not None and end is not None
+    raw = params or ""
+    if raw.startswith("@"):
+        raw = Path(raw[1:]).read_text()
+    res_params = json.loads(raw) if raw else {}
+    tf = timeframe or spec.cls.default_timeframe
+    if persist:
+        snap = create_snapshot(conn, ins.instrument_id, "1m", start, end)
+        source_id = snap.snapshot_id
+    else:
+        source_id = "adhoc"
+    r = run_batch(
+        engine_id, res_params, bars, tf, instrument=ins, calendar=cal, source_id=source_id,
+        allow_unready=allow_unready,
+    )  # fmt: skip
+    cols = sorted({k for _, p in r.plots for k in p})
+    lines = [
+        f"engine {r.engine_id} v{r.engine_version} · {symbol} {tf} · config {r.config_hash[:12]}",
+        f"1m bars {len(bars)} -> chart bars {len(r.bars)} · source {source_id}",
+        f"plots {len(r.plots)} rows: {', '.join(cols[:8])}",
+        f"events {len(r.events)} · overlays {len(r.overlays)} · trades {len(r.trades)}",
+    ]
+    if persist:
+        from nifty.db.runs import persist_run
+
+        run_id, created = persist_run(conn, r)
+        lines.append(f"run_id {run_id} ({'created' if created else 'existing, nothing written'})")
+    else:
+        lines.append("not persisted (--no-persist)")
+    return lines
+
+
+def _run_engine_cli(a: argparse.Namespace) -> int:
+    from nifty.db.session import get_engine
+    from nifty.engines.base import load_builtin_engines
+
+    load_builtin_engines()
+    with get_engine().begin() as conn:
+        lines = run_engine(
+            conn, engine_id=a.engine, symbol=a.symbol, timeframe=a.timeframe,
+            from_date=a.from_date, to_date=a.to_date, params=a.params,
+            persist=not a.no_persist, allow_unready=a.allow_unready,
+        )  # fmt: skip
+    print("\n".join(lines[:15]))
+    return 0 if lines and not lines[0].startswith(("unknown", "refused", "no ")) else 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,6 +232,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_date", required=True, help="first session date (inclusive)")
     p.add_argument("--to", dest="to_date", required=True, help="last session date (inclusive)")
     p.add_argument("--tf", default="1m")
+    p = sub.add_parser("run-engine", help="run an engine over stored 1m bars (developer tool)")
+    p.add_argument("--engine", required=True)
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--timeframe")
+    p.add_argument("--from", dest="from_date", help="first session date (inclusive)")
+    p.add_argument("--to", dest="to_date", help="last session date (inclusive)")
+    p.add_argument("--params", help="JSON or @file")
+    p.add_argument("--no-persist", action="store_true")
+    p.add_argument("--allow-unready", action="store_true")
     args = ap.parse_args(argv)
     if args.cmd == "hash-password":
         pw = getpass.getpass("Password: ")
@@ -157,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         return _bars(args)
     elif args.cmd == "snapshot":
         return _snapshot(args)
+    elif args.cmd == "run-engine":
+        return _run_engine_cli(args)
     return 0
 
 

@@ -1,3 +1,4 @@
+import math
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -47,4 +48,14 @@ def day_bars(
             continue
         p = 100.0 + i
         out.append(bar(open_ + timedelta(minutes=i), p, p + 2, p - 2, p + 1, 5.0 + i))
+    return out
+
+
+def wave(d: date, n: int = 375, period: int = 23) -> list[Bar]:
+    """1m bars whose close oscillates so moving averages cross both ways."""
+    open_, _ = CAL.session_bounds(d)
+    out = []
+    for i in range(n):
+        c = 25000 + 20 * math.sin(2 * math.pi * i / period)
+        out.append(bar(open_ + timedelta(minutes=i), c, c + 1, c - 1, c, 5.0))
     return out

@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C02
-last_update: 2026-11-23 (C01)
+next_chunk: C03
+last_update: 2026-11-23 (C02)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -9,7 +9,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 |----|--------|-------|
 | C00 | done | scaffold, compose, make tools |
 | C01 | done | data core, CSV replay |
-| C02 | pending | engine framework, pinekit, broker emulator |
+| C02 | done | engine framework, pinekit, broker emulator |
 | C03 | pending | NVS port |
 | C04 | pending | backtests, audit, analytics, export |
 | C05 | pending | UI chart core |
@@ -38,11 +38,25 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Upsert rule: identical (o,h,l,c,v,volume_kind) to ANY stored revision = no-op; otherwise new revision = max+1
 - DB-test rule: marker `db`; run on `nifty_test` on the server in `DATABASE_URL` (repo-root `.env`), never the dev DB; migrated through a passed connection (alembic `config.attributes["connection"]`) and rolled back after each test; skipped only when the server is unreachable, an auth failure fails.
 - DB tests: `tests/conftest.py` fixtures `test_db_url` / `migrated_url` (alembic via connection) / `db_conn` (rolled back per test)
+- Engines (C02). Register: `from nifty.engines.base import register_engine`; call `register_engine(MyEngine, ready=bool)` at import time of the engine module and add that module to `BUILTIN_ENGINE_MODULES` (loaded by `load_builtin_engines()`). `list_engines()` hides `ready=False`; `get_engine(id, allow_unready=False)`. Engine class attrs: `id version default_timeframe Params plots warmup_bars`; methods `on_bar on_provisional snapshot restore panel`; `Params` subclasses `EngineParams` (extra=forbid; `ui: UiParams` subclass excluded from config_hash)
+- Runner (`nifty.engines.runner`): `run_batch(engine_id, params, bars_1m, timeframe=None, *, instrument=None, calendar=None, source_id="batch", allow_unready=False, proxy_volume_1m=None) -> RunResult`; `run_incremental(engine_id, params, bars_1m, timeframe=None, *, ..., provisional=False, restart_after=None)`; `run_with_restart(engine_id, params, bars_1m, timeframe=None, *, cut, **kw)` (snapshot after `cut` chart bars -> `json.dumps(allow_nan=False)` round trip -> new engine+ctx -> `restore`). `RunResult{bars, plots[(bar_start, {name: float|None})], events[EngineEvent], overlays[OverlayElement], trades, panel, provisional[...], config_hash, source_id,...}`. Runner stamps event envelope (engine_id/version/config_hash/instrument/source/tf/times), `seq` per (bar_start, event_type), `available_at_utc = bar_end` (provisional: that 1m bar's end), NaN -> None in plots, event payloads, panel, overlay p0/p1/style/meta and trade fields (a NaN in a REQUIRED trade float raises ValueError). Event id = uuid5(`EVENT_NAMESPACE`=6b0f1c52-3f3e-5a4e-9d57-7a1e0c2b8a10, `engine|config_hash|instrument|tf|bar_start_iso|type|seq[|provisional]`)
+- `EngineContext(instrument, timeframe, calendar, proxy_volume_1m=None)`: `mintick` (ConfigError if tick_size None), `provisional` flag, `append_1m` (runner only), `prior_day(bar)->PriorDay{date,high,low,close}|None`, `htf(bar,res)->HtfStep{new_bar, completed}`, `sub_bars(bar,res)->list[Bar]` (ConfigError unless res < chart tf and divides it), `proxy_volume(bar)->float|None`
+- pinekit (`import nifty.engines.pinekit as pk`): `NaN isna nz pmax pmin (also pk.max/pk.min) Series enc dec` · stateful `Sma Sum Highest Lowest Stdev Ema(len, seed='first'|'sma') Rma Tr Atr AtrSess Rsi Change Crossover Crossunder PivotHigh PivotLow(left,right,pivot_ties='default'|'strict')` each `update(...)`, `state()`, `load()` (JSON-safe) · `round_to_mintick(x, mintick)` · session helpers `bar_minutes_ist is_new_session(bar, prev, cal) is_last_bar_of_session(bar, cal) bucket_start timeframe_change(bar, prev, res, cal)`
+- Execution: `resolve_barriers(side, entry_px, stop_px, target_px, bars, max_hold_bars, mode, cost_pts=0.0) -> Resolution{exit_idx, exit_px, reason TARGET|STOP|TIME, flags, mae_pts, mfe_pts, bars_held, gross_pts, cost_pts, net_pts}`; `step_bar(...)`. `BrokerEmulator(engine_id, instrument_id, qty=1, commission_pct=0)`: `on_bar(bar)->[TradeRecord]` (call BEFORE the script), `entry(side, signal_bar_start, reason)`, `close(reason, immediately=False)`, `close_all(...)`, `exit(stop=None, limit=None)`, `.position` (script-visible), `.actual_position`
+- DB (rev 0003): tables `engine_configs engine_runs plot_points events overlay_elements` (events/overlays carry `ord` = emission order). `nifty.db.runs`: `persist_run(conn, RunResult)->(run_id, created)`, `find_run`, `load_plots`, `load_events(conn, run_id, available_by=None)`, `load_overlays(...)`. Run key = sha256(engine|version|config_hash|source_id|timeframe). `run-engine` and `snapshot` share `nifty.cli.session_range` (inclusive session dates; omitted => first/last stored bar's session), so they produce the same snapshot_id
+- CLI: `run-engine --engine ID --symbol S [--timeframe] [--from --to] [--params JSON|@file] [--no-persist] [--allow-unready]` (function `nifty.cli.run_engine(conn, ...)`). No production engine exists yet, so it cannot be run by hand until C03; covered by DB tests with `test.sma_cross`
 - Make targets implemented: up down ps logs check test migrate db-q bars init-env hash-password api-types. Stubs (exit 2): parity bench e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- Chart bars handed to engines carry NO `quality_flags` (partial/gap flags use later data = lookahead and differ batch vs incremental). Engines see `volume_kind` and finalized bars only; flags remain on stored/resampled bars.
+- D07 run key includes `timeframe` (config_hash does not cover it). Trades are not persisted in C02 (C04 `trades`).
+- Tests live in `backend/tests/unit/{engines,execution,contracts}/`; `make test T=backend/tests/...` strips the `backend/` prefix. Test engine `test.sma_cross` is in `backend/tests/sma_cross_engine.py` (registered only inside tests).
+- `prior_day` = previous session present in the data (e.g. Wed 11-11 sees Mon 11-09, no data on 11-10).
+- Conservative mode MFE on a STOP bar = 0 (no credit for favourable moves), MAE clipped at the stop; tv mode uses the O-H-L-C path. Tie `(high-open)==(open-low)` => path O-L-H + flag `uncertain_path`.
+- `atr_sess` = Wilder ATR where TR resets to high-low on a session's first bar; smoothing stays continuous (spec/07 L14).
+- `EngineSpec.cls`/`register_engine` are typed `type[Any]` (mypy cannot express protocol class attributes).
 - Unit types are float subclasses, not `typing.NewType` (NewType cannot raise `UnitMismatch`). Not used on the per-bar hot path (D27).
 - `calendar_unverified` is reported on `ValidationReport`, not stored per bar (it would change bar identity when the calendar is edited). Per-bar flags stored: `gap_before`, `volume_absent`, `partial_bucket` (resample only).
 - Validation adds exclusion reasons `non_finite bad_ohlc bad_volume off_session non_session_day` beside `off_grid`; reports `out_of_order` (sorted, never silent). Gaps are interior only; session start/end shortfalls appear in `sessions`.
@@ -57,6 +71,9 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
+- Golden decides (log result in STATE when C03/C09 compare): `ema_seed` (default 'first'), rsi both-zero (100), `pivot_ties` (default), `round_to_mintick` epsilon.
+- Provisional events: the id is the same for every 1m update of one (bar, type, seq) slot, so consumers (C08) must treat a repeated id as 'replace with the latest update'; `available_at_utc` is that update's 1m bar end.
+- Provisional plots/events are kept on `RunResult.provisional` only; not persisted.
 - Backend image now mirrors the repo layout (`/app/backend`, `/app/data`, editable install) so `parents[3]` paths resolve; UNVERIFIED until Docker exists.
 - Oracle CSV has no data for Tue 2026-11-10 (18 weekdays, 17 sessions). Not added to the calendar (never guess holidays). User: confirm whether it was a market holiday and fill `data/calendar.yml`.
 - `calendar_days` table is created but nothing loads `data/calendar.yml` into it yet.
@@ -68,4 +85,4 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Native DB verified 2026-11-23: `make migrate` -> rev 0001, timescaledb ext + prefs present, `nifty_test` DB test passes, live /healthz 200, /readyz 200, /auth/me 401 unauth. Needed PGDG repo for pg 18.7 (Ubuntu has 18.6; Timescale 2.32 needs >=18.7). Role is SUPERUSER (dev only).
 - WSL Ubuntu 26.04, Python 3.14.4, node 22.22, npm 9.2; apt offers postgresql 18, redis 8.0; timescaledb needs Timescale's apt repo.
 - Resolved deps (3.14 wheels all available): fastapi 0.165, sqlalchemy 2.1.9, alembic 1.20, pydantic 2.14, psycopg 3.3.9, numpy 2.5, pandas 3.1.
-- `make check` green (C01): ruff, format, mypy strict, pytest 51 incl. DB tests, tsc, vitest. Oracle import verified: 5997/5996/1 off_grid/17 sessions/3 gaps/absent; 2nd import 0 rows; snapshot id stable (snap_d58a5e9581f9cfe6 for 2026-10-22..2026-11-16 1m).
+- `make check` green (C02): ruff, format, mypy strict, pytest 130 incl. DB tests (nifty_test), tsc, vitest. Oracle import + snapshot numbers from C01 unchanged. Dev DB migrated to 0003.

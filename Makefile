@@ -32,7 +32,7 @@ check:
 	$(call step,vitest,cd web && npx vitest run)
 
 test:
-	@cd backend && $(PY) -m pytest -q -x --tb=short $(T)
+	@cd backend && $(PY) -m pytest -q -x --tb=short $(patsubst backend/%,%,$(T))
 
 migrate:
 	@cd backend && $(PY) -m alembic upgrade head 2>&1 | tail -n 15
