@@ -7,7 +7,7 @@ CORE = (
     "nifty.marketdata.providers.csv_replay, nifty.contracts.engine, nifty.engines.base, "
     "nifty.engines.context, nifty.engines.runner, nifty.engines.pinekit, "
     "nifty.engines.pinekit.indicators, nifty.engines.pinekit.session, nifty.execution.barriers, "
-    "nifty.execution.broker"
+    "nifty.execution.broker, nifty.analytics.metrics, nifty.analytics.export"
 )
 BANNED = ["sqlalchemy", "fastapi", "redis", "nifty.api", "nifty.db"]
 

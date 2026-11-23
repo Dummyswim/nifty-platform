@@ -41,3 +41,17 @@ def find_by_symbol(conn: Connection, symbol: str) -> Instrument | None:
         return None
     data = {c: row[c] for c in _COLS}
     return Instrument(**data, provider_meta=row["pm"] or {})
+
+
+def get_instrument(conn: Connection, instrument_id: str) -> Instrument | None:
+    row = (
+        conn.execute(
+            text("SELECT *, provider_meta AS pm FROM instruments WHERE instrument_id = :i"),
+            {"i": instrument_id},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    return Instrument(**{c: row[c] for c in _COLS}, provider_meta=row["pm"] or {})

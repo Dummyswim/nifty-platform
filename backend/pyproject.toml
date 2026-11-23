@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi", "uvicorn[standard]", "pydantic", "pydantic-settings",
   "sqlalchemy>=2", "alembic", "psycopg[binary]", "httpx", "websockets",
-  "numpy", "pandas", "pyyaml",
+  "numpy", "pandas", "pyyaml", "openpyxl",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +38,7 @@ select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008"]  # FastAPI Depends() defaults
 
 [[tool.mypy.overrides]]
-module = ["yaml"]
+module = ["yaml", "openpyxl", "openpyxl.*"]
 ignore_missing_imports = true  # no types-PyYAML: not a chunk dependency
 
 [tool.ruff.lint.per-file-ignores]

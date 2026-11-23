@@ -5,9 +5,10 @@ from alembic.script import ScriptDirectory
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 
-from nifty.api import auth
+from nifty.api import auth, routes
 from nifty.api.auth import Throttle
 from nifty.db.session import get_engine
+from nifty.engines.base import load_builtin_engines
 
 ALEMBIC_DIR = Path(__file__).resolve().parents[3] / "alembic"  # backend/alembic (or /app/alembic)
 
@@ -37,5 +38,7 @@ def create_app() -> FastAPI:
             raise HTTPException(503, f"migrations behind: {rev}")
         return {"status": "ready"}
 
+    load_builtin_engines()
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(routes.router, prefix="/api/v1")
     return app

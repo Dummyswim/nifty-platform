@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C04
-last_update: 2026-11-23 (C03)
+next_chunk: C05
+last_update: 2026-11-23 (C04)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -11,7 +11,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C01 | done | data core, CSV replay |
 | C02 | done | engine framework, pinekit, broker emulator |
 | C03 | done | NVS port, parity harness |
-| C04 | pending | backtests, audit, analytics, export |
+| C04 | done | jobs, worker, backtests, analytics, export, API, bench |
 | C05 | pending | UI chart core |
 | C06 | pending | UI indicators, replay, audit/analytics (MVP) |
 | C07 | pending | Kite REST + instrument master |
@@ -47,11 +47,18 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - CLI: `run-engine --engine ID --symbol S [--timeframe] [--from --to] [--params JSON|@file] [--no-persist] [--allow-unready]` (function `nifty.cli.run_engine(conn, ...)`). No production engine exists yet, so it cannot be run by hand until C03; covered by DB tests with `test.sma_cross`
 - NVS (C03): engine `pine.nvs_scalper` v1, `nifty.engines.nvs` (`NvsScalper`, `NvsParams` in `params.py`; registered `ready=True`, listed in `BUILTIN_ENGINE_MODULES`). Doc `docs/engines/nvs.md`. Engine owns a `BrokerEmulator` (calls `on_bar` first); emits trades in `EngineOutput.trades`. Emulator gained `state()/load()` (snapshot) and `cancel_entries()`.
 - Parity (`nifty.parity`): `tv_io` (`RefTrade`, `load_tv_ohlc_plots`, `tv_bars`, `load_tv_trades`, `load_oracle_trades`, `parse_time`), `compare` (`tier_a(ours_plots, golden{series:{ts:v}}, warmup)`, `tier_bc(trades, ref, tf, px_tol, exit_px_tol)->TierBC{entries_ok, exits_ok, diffs}`), `cli.run_parity(engine, golden, oracle)`; `SERIES` maps TV plot titles -> engine plots per engine (add Balu in C09). CLI `python -m nifty.cli parity --engine ID [--golden DIR] [--oracle PATH]`; `make parity E=<id> [G=dir]`. Golden dir default `fixtures/tv_golden/<engine_id>`, falls back to `.../nvs` (RUNBOOK name).
-- Make targets implemented: up down ps logs check test migrate db-q bars parity init-env hash-password api-types. Stubs (exit 2): bench e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
+- Jobs (rev 0004: `jobs backtests trades`): kinds `backtest` {engine_id, symbol|snapshot_id, from_date, to_date, timeframe, mode tv|conservative, qty, cost_pts, params} and `engine_run` {same minus mode/qty/cost}. `nifty.db.jobs`: `submit_job(conn, kind, payload)->(id, created)` (key = sha256(kind|canonical payload)), `claim_job` (SKIP LOCKED, caller commits), `heartbeat`, `finish_job` (empty result => failed), `fail_job` (error <=300 chars), `requeue_stale(conn, secs, max_attempts=3)`. Worker `python -m nifty.worker` (`process_one(engine, handlers)`, `run_loop`; handlers in `nifty.worker.handlers.HANDLERS`; heartbeat thread 10 s, stale 60 s). Compose profile `worker` runs it.
+- Backtests (`nifty.db.backtests`): `run_backtest(conn, payload)->backtest_id` (id = sha256(run_key|mode|qty|cost)), `resolve_input`, `load_trades`, `get_backtest`, `list_backtests`, `audit_trade`; `BacktestError` = user-level failure. Pine engines only run in `tv` mode; `tv` rejects cost_pts (engine commission); `conservative` subtracts explicit `cost_pts` per trade (for research engines, C13). CLI `python -m nifty.cli backtest run --engine ID --symbol S --timeframe 5m --mode tv [--from --to --qty --cost-pts --params]`.
+- Metrics (`nifty.analytics.metrics.compute_metrics(trades, session_of, sessions=None)`): win = net>0 (flat breaks streaks); win_rate fraction; profit_factor null + `no_losses`; expectancy_pts = mean; max_drawdown_pts = peak-to-trough of cumulative net in exit order (peak starts 0); sharpe = mean/sample-stdev of per-session net_pts * sqrt(252), rf 0, sessions = every session of the tested bars (zero-trade = 0), `n_sessions`, `low_n` (<30), flags `low_n|no_losses|zero_variance`. Export `nifty.analytics.export` (csv/json/xlsx, unit-suffixed headers, strike/option null for index trades).
+- API (`nifty.api.routes`, all under /api/v1, cookie required, POST checks Origin): GET `engines`; POST `engines/{id}/run` (202, job); GET `jobs/{id}` (+`backtest_id`); POST/GET `backtests`, GET `backtests/{id}`, `/trades`, `/analytics`, `/audit/{trade_id}?window=N`, `/export?fmt=csv|xlsx|json`; GET `plots|events|overlays` by `run_id` or `engine_id+snapshot_id[+timeframe+config_hash]` (+`available_by`); POST `datasets/import?symbol&tick_size&tz&dry_run` with the raw file as body (text/csv or application/json, 25 MB). `make api-types` regenerated.
+- Bench (`make bench`, tools/bench.py, SYNTHETIC tiled oracle sessions, 100,099 1m bars, NVS 5m, WSL2): batch 84k 1m bars/s (17k chart bars/s, 1.2 s), incremental 46k/s (2.2 s), peak RSS 264 MB. Not tuned.
+- Make targets implemented: up down ps logs check test migrate db-q bars parity bench init-env hash-password api-types. Stub (exit 2): e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C04: `datasets/import` takes the raw file as the request body (no multipart: python-multipart is not a listed dependency). `openpyxl` added to pyproject (chunk-listed); mypy ignores its missing stubs. Sharpe/audit/metric definitions as in Interfaces. Trades persisted for the NVS tv mode only (index points); option fields stay null until C12. `engine_run` jobs persist a run without a backtest.
+- C04 acceptance numbers: NVS on the oracle = 15 trades, net -23.74 pts vs twin -13.75: costs match (88.99 vs 88.98; 0.0125 %/side = 2.5 bps round trip) and the ~10 pts gross gap is the stop/target anchoring (signal close + mintick rounding vs fill-anchored, unrounded).
 - C03: Pine L278 `barstate.isconfirmed` (missing from the port map) is honoured: no `signal` while `ctx.provisional`. `run_batch` skips the 1m aux buffer when fed chart-tf bars (TV golden input). `docs/prompts/` (untracked user copy of C03) left alone.
 - C03: golden dir `fixtures/tv_golden/<engine_id>` (spec/04) and RUNBOOK's `.../nvs` both accepted. NVS plot `buy/sell_near/far` are always computed (the Pine `showBands` toggle is UI only). `volume_kind=absent` forces TWAP even if a volume value is present. Stop/target overlay lines show the INITIAL levels; BE ratchets are `stop_update` events.
 - Chart bars handed to engines carry NO `quality_flags` (partial/gap flags use later data = lookahead and differ batch vs incremental). Engines see `volume_kind` and finalized bars only; flags remain on stored/resampled bars.

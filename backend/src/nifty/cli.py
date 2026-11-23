@@ -212,6 +212,49 @@ def _run_engine_cli(a: argparse.Namespace) -> int:
     return 0 if lines and not lines[0].startswith(("unknown", "refused", "no ")) else 2
 
 
+def format_metrics(m: dict[str, object]) -> list[str]:
+    def f(x: object, nd: int = 2) -> str:
+        return "n/a" if x is None else f"{x:.{nd}f}" if isinstance(x, float) else str(x)
+
+    return [
+        f"trades {m['n_trades']} (W {m['wins']} / L {m['losses']}) · "
+        f"win_rate {f(m['win_rate'], 3)}",
+        f"total_pnl_pts {f(m['total_pnl_pts'])} · expectancy_pts {f(m['expectancy_pts'])}",
+        f"profit_factor {f(m['profit_factor'])} · max_drawdown_pts {f(m['max_drawdown_pts'])}",
+        f"max consecutive wins {m['max_consecutive_wins']} / losses {m['max_consecutive_losses']}",
+        f"sharpe {f(m['sharpe'])} over {m['n_sessions']} sessions"
+        + (" (LOW N: < 30 sessions)" if m["low_n"] else ""),
+        f"flags: {', '.join(m['flags']) or 'none'}",  # type: ignore[arg-type]
+    ]
+
+
+def _backtest_cli(a: argparse.Namespace) -> int:
+    from nifty.db.backtests import BacktestError, get_backtest, run_backtest
+    from nifty.db.session import get_engine
+
+    payload = {
+        k: v
+        for k, v in {
+            "engine_id": a.engine, "symbol": a.symbol, "timeframe": a.timeframe,
+            "from_date": a.from_date, "to_date": a.to_date, "mode": a.mode, "qty": a.qty,
+            "cost_pts": a.cost_pts, "params": json.loads(a.params) if a.params else None,
+        }.items()
+        if v is not None
+    }  # fmt: skip
+    try:
+        with get_engine().begin() as conn:
+            bt_id = run_backtest(conn, payload)
+            row = get_backtest(conn, bt_id)
+    except BacktestError as e:
+        print(f"refused: {e}")
+        return 2
+    assert row is not None
+    print(f"backtest {bt_id} · {row['engine_id']} {row['timeframe']} {row['mode']}")
+    print(f"snapshot {row['snapshot_id']}")
+    print("\n".join(format_metrics(row["summary"])))
+    return 0
+
+
 def _parity(a: argparse.Namespace) -> int:
     from nifty.parity.cli import run_parity
 
@@ -251,6 +294,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--params", help="JSON or @file")
     p.add_argument("--no-persist", action="store_true")
     p.add_argument("--allow-unready", action="store_true")
+    p = sub.add_parser("backtest", help="backtest commands")
+    bsub = p.add_subparsers(dest="bt_cmd", required=True)
+    p = bsub.add_parser("run", help="run an engine over stored bars and print the metrics")
+    p.add_argument("--engine", required=True)
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--timeframe")
+    p.add_argument("--from", dest="from_date")
+    p.add_argument("--to", dest="to_date")
+    p.add_argument("--mode", choices=["tv", "conservative"], default="tv")
+    p.add_argument("--qty", type=float, default=1.0)
+    p.add_argument("--cost-pts", type=float, default=0.0)
+    p.add_argument("--params", help="JSON")
     p = sub.add_parser("parity", help="compare an engine with TradingView golden / the oracle")
     p.add_argument("--engine", required=True)
     p.add_argument("--golden", help="dir with ohlc_plots.csv and trades.csv")
@@ -275,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
         return _snapshot(args)
     elif args.cmd == "run-engine":
         return _run_engine_cli(args)
+    elif args.cmd == "backtest":
+        return _backtest_cli(args)
     elif args.cmd == "parity":
         return _parity(args)
     return 0
