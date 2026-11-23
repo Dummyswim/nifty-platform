@@ -1,0 +1,6 @@
+# User-maintained NSE calendar (D09). Never guess holidays.
+# Without `verified_through`, every date is treated as a weekday session and reported
+# as `calendar_unverified`.
+holidays: []            # e.g. ["2026-01-26"]
+special_sessions: []    # e.g. [{date: "2026-11-08", open: "18:15", close: "19:15"}]
+# verified_through: 2026-12-31   # set once you have checked holidays up to this date

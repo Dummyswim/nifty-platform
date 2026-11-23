@@ -1,3 +1,7 @@
+from functools import lru_cache
+from pathlib import Path
+
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 
@@ -5,7 +9,12 @@ from nifty.api import auth
 from nifty.api.auth import Throttle
 from nifty.db.session import get_engine
 
-HEAD_REVISION = "0001"
+ALEMBIC_DIR = Path(__file__).resolve().parents[3] / "alembic"  # backend/alembic (or /app/alembic)
+
+
+@lru_cache
+def head_revision() -> str | None:
+    return ScriptDirectory(str(ALEMBIC_DIR)).get_current_head()
 
 
 def create_app() -> FastAPI:
@@ -19,11 +28,12 @@ def create_app() -> FastAPI:
     @app.get("/readyz")
     def readyz() -> dict[str, str]:
         try:
+            head = head_revision()
             with get_engine().connect() as c:
                 rev = c.execute(text("select version_num from alembic_version")).scalar()
         except Exception as e:
             raise HTTPException(503, "db unreachable or not migrated") from e
-        if rev != HEAD_REVISION:
+        if rev != head:
             raise HTTPException(503, f"migrations behind: {rev}")
         return {"status": "ready"}
 

@@ -1,6 +1,8 @@
 FROM python:3.14-slim
-WORKDIR /app
+# mirror the repo layout: code resolves alembic/, data/ and .env relative to its own location
+WORKDIR /app/backend
 COPY backend/pyproject.toml backend/alembic.ini ./
 COPY backend/src ./src
 COPY backend/alembic ./alembic
-RUN pip install --no-cache-dir .
+COPY data /app/data
+RUN pip install --no-cache-dir -e .

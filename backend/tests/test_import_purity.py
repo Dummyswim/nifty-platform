@@ -1,7 +1,11 @@
 import subprocess
 import sys
 
-CORE = "nifty.contracts, nifty.timeutil, nifty.engines, nifty.execution, nifty.analytics"
+CORE = (
+    "nifty.contracts, nifty.timeutil, nifty.engines, nifty.execution, nifty.analytics, "
+    "nifty.marketdata.importer, nifty.marketdata.validation, nifty.marketdata.resample, "
+    "nifty.marketdata.providers.csv_replay"
+)
 BANNED = ["sqlalchemy", "fastapi", "redis", "nifty.api", "nifty.db"]
 
 
