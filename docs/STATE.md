@@ -1,8 +1,8 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C07
-last_update: 2026-11-23 (C06)
-env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
+next_chunk: C08
+last_update: 2026-11-23 (C07)
+env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (key+secret in .env; live UNVERIFIED until you run make kite-smoke)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
 | id | status | notes |
@@ -14,7 +14,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C04 | done | jobs, worker, backtests, analytics, export, API, bench |
 | C05 | done | UI chart core, drawings, login, e2e |
 | C06 | done | UI indicators, overlays, replay, backtests/audit/analytics (MVP, tag mvp-nvs) |
-| C07 | pending | Kite REST + instrument master |
+| C07 | done | Kite REST client, provider, master, token, login flow (offline-tested; live unverified) |
 | C08 | pending | Kite live collector + live engine runner |
 | C09 | pending | Balu 1: params, levels, golden, moving line |
 | C10 | pending | Balu 2: zones, location, pressure, sweeps |
@@ -58,11 +58,15 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - e2e: `make e2e` = `tools/e2e_run.py` (seeds/migrates/truncates `nifty_test` with the oracle CSV, builds the SPA, starts uvicorn + `vite preview` on free ports with a temp password, runs `web/e2e/smoke.spec.ts`; `E2E_SHOT=<png>` saves a 1280x800 screenshot). Never run it concurrently with pytest (same DB). Chromium needs 4 system libs; without sudo they are extracted into gitignored `tools/.e2e-libs` (recipe in the script docstring).
 - C06 web modules: `overlay/{pick,layers,primitive}.ts` (pickOverlays by `avail <= cursor`, one `OverlayPrimitive` drawing every kind, `plotLayers/revealPlot/splitRuns`), `replay/{logic,store}.ts` + `ReplayBar` (zustand `cursor` UTC s, null = end), `indicators/{schemaForm,useIndicators,IndicatorPanel,EnginePanel}`, `backtests/{Backtests,AuditDrawer,Analytics(lazy, ECharts),Metrics,series,audit,tradeTable}`. Page state in `src/store.ts` (`page`, `symbol`, `tf`, `focus` set by the audit drawer, `backtestId`). Prefs keys: `chart` {symbol, tf}, `indicators` {engine_id: {enabled, params, ui}} (NVS enabled by default). Indicator run = `POST engines/{id}/run` on the engine's default tf with only non-default, non-ui params (stable job key), polled via `/jobs/{id}`, outputs via `plots|events|overlays?run_id=`.
 - API additions (C06): typed response models for engines (`params_schema`, `plots` specs), jobs, backtests, analytics, audit, `plots` (now `t` epoch s, `timeframe`, `panel`), `events`, `overlays`. DOM hooks on the chart: `data-shown` (bars revealed), `data-entry-markers` (revealed at cursor), `data-overlays`, `data-plots`, `data-cursor`.
-- Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
+- Kite (C07, facts in `docs/spec/08-kite-verified.md`): `nifty.marketdata.kite.client.KiteClient(api_key, api_secret, access_token, transport=, limiter=, sleep=)` with `login_url() exchange_token(rt) profile() instruments(exchange=None) historical(token, interval, start, end, oi=, continuous=) ltp(keys)`; read-only ALLOWLIST (else `ForbiddenEndpoint` before I/O), `RateLimiter` (historical 3/s, quote 1/s, other 10/s), retries only NETWORK/RATE_LIMITED (<=3, backoff+jitter), `map_error`, secrets redacted everywhere. `KiteProvider(client, instruments, day_limit=60).historical(ins, "1m", start, end)` (1m only; windows by day limit; index => volume_kind absent). `marketdata.kite.master`: `parse_master` (NSE index rows + NFO NIFTY FUT/CE/PE only), `nifty_index front_month_future expiries option_universe strike_step`. `marketdata.kite.tokens`: Fernet via HKDF(APP_SECRET_KEY), `next_expiry` (06:00 IST). `nifty.db.kite`: `store_token load_token client_for kite_status (profile check <=5 min) save_master kite_instruments`. Tables (rev 0006): `instrument_masters` (version `<date>_<sha12>`, gz dump), `kite_tokens`. Instrument ids `kite:<exchange>:<tradingsymbol>`; `find_by_symbol(conn, sym, provider=)`.
+- Kite API/jobs/CLI: GET `kite/login-url`, GET `kite/callback` (cookie required; exchanges server-side; 303 to `<first APP_ORIGINS>/settings?kite=connected|error`), GET `kite/status`, POST `kite/instruments/refresh`, POST `kite/backfill` {symbol, from_date, to_date} (jobs `kite_instruments`, `kite_backfill`, nonce in payload so retries are never deduped). CLI `kite-instruments`, `kite-backfill --symbol --from --to`, `kite-smoke [--probe-limits]` (`make kite-smoke [ARGS=--probe-limits]`). Settings page: Connect/Reconnect, badge, refresh, backfill.
+- To run the live check (no Docker here): `cd backend && python -m uvicorn nifty.api.main:create_app --factory --port 8000`, a worker `python -m nifty.worker`, and `cd web && npm run build && npx vite preview --host 127.0.0.1 --port 8080`; open http://127.0.0.1:8080, log in, Settings -> Connect Kite, then `make kite-smoke --probe-limits` (ARGS=--probe-limits).
+- Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e kite-smoke init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C07: spec/05 updated: quote endpoints are 1 req/s (not ~10); per-request day limits and the paid-plan requirement are NOT on the docs pages (unverified: provider assumes minute=60 days; `kite-smoke --probe-limits` tests 60/61). Candle timestamps parse with the importer (+0530 without colon works). Master stores only NSE index rows and NFO NIFTY derivatives as `instruments`; the full dump is kept gzipped per version. `cryptography` added (new package only, no installed package changed). Did not ask the kite_creds question: you had already said the key/secret are in `.env`. No live Kite call was made; `.env` never read.
 - C06: one `OverlayPrimitive` class with a draw branch per kind instead of eight classes. Step plots (stop/target) are drawn as one series per contiguous run (lightweight-charts connects stepped lines across gaps). Engine outputs only come from the worker (`engine_run` jobs), so `make e2e` now starts the worker too. New-run form: date range (no snapshot picker); zone/band/region renderers are untested visually (NVS emits only markers and lines). Replay play starts 200 bars before the end when begun from live. Engine panel is the latest bar only (spec). Audit "Open on chart" switches to the backtest timeframe and draws entry/stop/target/exit from the audit payload.
 - C05: added deps `lightweight-charts@5`, `@playwright/test`; chromium system libs (libnspr4, libnss3, libasound2t64) came from `apt-get download` extracted into `tools/.e2e-libs` (no sudo; avoided the ASK). Shared `api` fixture + `TABLES` moved into tests/conftest.py. `run_batch` skips the 1m aux buffer for non-1m input. No router dependency (page state in zustand). Drawing text is edited only at creation (window.prompt); no edit-in-place yet. Volume pane code exists but is untested in the browser (the oracle has `volume_kind=absent`).
 - C04: `datasets/import` takes the raw file as the request body (no multipart: python-multipart is not a listed dependency). `openpyxl` added to pyproject (chunk-listed); mypy ignores its missing stubs. Sharpe/audit/metric definitions as in Interfaces. Trades persisted for the NVS tv mode only (index points); option fields stay null until C12. `engine_run` jobs persist a run without a backtest.
@@ -90,6 +94,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
+- Kite live UNVERIFIED: run the steps under Interfaces (Kite API/jobs/CLI) and paste the PASS/FAIL lines. Day limits, plan entitlement and the NIFTY 50 index row in the dump are checked there.
 - golden_tv=none: NVS golden not exported yet; `make parity` prints `golden missing` for it. Export steps: RUNBOOK §Golden (user to confirm when files exist).
 - Golden decides (log result in STATE when C03/C09 compare): `ema_seed` (default 'first'), rsi both-zero (100), `pivot_ties` (default), `round_to_mintick` epsilon.
 - Provisional events: the id is the same for every 1m update of one (bar, type, seq) slot, so consumers (C08) must treat a repeated id as 'replace with the latest update'; `available_at_utc` is that update's 1m bar end.

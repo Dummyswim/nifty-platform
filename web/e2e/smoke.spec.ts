@@ -90,5 +90,9 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect(page.getByTestId("equity")).toBeVisible();
   await expect(page.getByTestId("session-hist").locator("canvas")).toHaveCount(1);
 
+  // settings: Kite status badge (no live Kite call is made without a token)
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByTestId("kite-badge")).toHaveText(/not (configured|connected)/);
+
   expect(problems).toEqual([]);
 });

@@ -5,7 +5,7 @@ from alembic.script import ScriptDirectory
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 
-from nifty.api import auth, chart_routes, routes
+from nifty.api import auth, chart_routes, kite_routes, routes
 from nifty.api.auth import Throttle
 from nifty.db.session import get_engine
 from nifty.engines.base import load_builtin_engines
@@ -42,4 +42,5 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(routes.router, prefix="/api/v1")
     app.include_router(chart_routes.router, prefix="/api/v1")
+    app.include_router(kite_routes.router, prefix="/api/v1")
     return app

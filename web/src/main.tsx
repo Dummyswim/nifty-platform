@@ -12,6 +12,9 @@ const Backtests = lazy(() => import("./backtests/Backtests").then((m) => ({ defa
 const Analytics = lazy(() => import("./backtests/Analytics"));
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 
+// Kite redirects back to /settings?kite=connected|error
+if (new URLSearchParams(window.location.search).has("kite")) useUi.setState({ page: "settings" });
+
 function Shell({ onLogout }: { onLogout: () => void }) {
   const { page, set } = useUi();
   const tab = (id: Page, label: string) => (

@@ -17,3 +17,5 @@ export type BacktestRow = components["schemas"]["BacktestRow"];
 export type MetricsOut = components["schemas"]["MetricsOut"];
 export type TradeOut = components["schemas"]["TradeRecord"];
 export type AuditOut = components["schemas"]["AuditOut"];
+export type KiteStatusOut = components["schemas"]["KiteStatusOut"];
+export type LoginUrlOut = components["schemas"]["LoginUrlOut"];

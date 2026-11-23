@@ -418,6 +418,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/kite/login-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Login Url */
+        get: operations["login_url_api_v1_kite_login_url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kite/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Callback
+         * @description Kite redirects here with `request_token`; other params (`action`, `type`) are ignored. The
+         *     exchange happens server-side and the browser is sent back to the UI by absolute URL.
+         */
+        get: operations["callback_api_v1_kite_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kite/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_v1_kite_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kite/instruments/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Instruments */
+        post: operations["refresh_instruments_api_v1_kite_instruments_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kite/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Backfill */
+        post: operations["backfill_api_v1_kite_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -449,6 +538,24 @@ export interface components {
             window_bars: components["schemas"]["WindowBar"][];
             /** Events */
             events: components["schemas"]["EngineEvent"][];
+        };
+        /** BackfillIn */
+        BackfillIn: {
+            /**
+             * Symbol
+             * @default NIFTY 50
+             */
+            symbol: string;
+            /**
+             * From Date
+             * Format: date
+             */
+            from_date: string;
+            /**
+             * To Date
+             * Format: date
+             */
+            to_date: string;
         };
         /** BacktestIn */
         BacktestIn: {
@@ -724,10 +831,30 @@ export interface components {
             /** Backtest Id */
             backtest_id?: string | null;
         };
+        /** KiteStatusOut */
+        KiteStatusOut: {
+            /** Configured */
+            configured: boolean;
+            /** Connected */
+            connected: boolean;
+            /** User Id */
+            user_id?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Instruments Updated At */
+            instruments_updated_at?: string | null;
+        };
         /** LoginBody */
         LoginBody: {
             /** Password */
             password: string;
+        };
+        /** LoginUrlOut */
+        LoginUrlOut: {
+            /** Url */
+            url: string;
         };
         /** Me */
         Me: {
@@ -1845,6 +1972,131 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_url_api_v1_kite_login_url_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginUrlOut"];
+                };
+            };
+        };
+    };
+    callback_api_v1_kite_callback_get: {
+        parameters: {
+            query?: {
+                request_token?: string | null;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_api_v1_kite_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KiteStatusOut"];
+                };
+            };
+        };
+    };
+    refresh_instruments_api_v1_kite_instruments_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitOut"];
+                };
+            };
+        };
+    };
+    backfill_api_v1_kite_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackfillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitOut"];
                 };
             };
             /** @description Validation Error */

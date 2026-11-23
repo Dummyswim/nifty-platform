@@ -1,6 +1,7 @@
 """Job handlers: (connection, payload) -> result_ref. Raise on failure; never return empty."""
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection
@@ -35,4 +36,46 @@ def engine_run(conn: Connection, payload: dict[str, Any]) -> str:
     return persist_run(conn, r)[0]
 
 
-HANDLERS: dict[str, Handler] = {"backtest": backtest, "engine_run": engine_run}
+def kite_instruments(conn: Connection, payload: dict[str, Any]) -> str:
+    """Download the daily instrument dump, store it as a version and upsert what we use."""
+    from nifty.config import get_settings
+    from nifty.db.kite import client_for, save_master
+
+    text = client_for(conn, get_settings()).instruments()
+    version, ins = save_master(conn, text)
+    return f"{version} ({len(ins)} instruments)"
+
+
+def kite_backfill(conn: Connection, payload: dict[str, Any]) -> str:
+    """Fetch historical 1m candles for a stored Kite instrument and store them (D08)."""
+    from nifty.config import get_settings
+    from nifty.db.bars import upsert_bars
+    from nifty.db.instruments import find_by_symbol
+    from nifty.db.kite import client_for
+    from nifty.marketdata.kite.provider import KiteProvider
+    from nifty.marketdata.validation import validate_bars
+    from nifty.timeutil import IST
+
+    ins = find_by_symbol(conn, payload["symbol"], provider="kite")
+    if ins is None:
+        raise BacktestError(
+            f"{payload['symbol']!r} is not in the Kite instrument master; refresh instruments"
+        )
+    cal = Calendar.load()
+    day0 = datetime.fromisoformat(payload["from_date"]).replace(tzinfo=IST)
+    day1 = datetime.fromisoformat(payload["to_date"]).replace(tzinfo=IST) + timedelta(days=1)
+    bars = list(KiteProvider(client_for(conn, get_settings())).historical(ins, "1m", day0, day1))
+    ok, report = validate_bars(bars, cal)
+    u = upsert_bars(conn, ok)
+    return (
+        f"{len(ok)} bars: inserted {u.inserted}, revised {u.revised}, unchanged {u.noop}; "
+        f"gaps {len(report.gaps)}"
+    )
+
+
+HANDLERS: dict[str, Handler] = {
+    "backtest": backtest,
+    "engine_run": engine_run,
+    "kite_instruments": kite_instruments,
+    "kite_backfill": kite_backfill,
+}

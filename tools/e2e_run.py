@@ -59,7 +59,7 @@ def seed() -> str:
         command.upgrade(cfg, "head")
         conn.execute(
             text(
-                "TRUNCATE drawings, trades, backtests, jobs, events, overlay_elements, plot_points, "
+                "TRUNCATE kite_tokens, instrument_masters, drawings, trades, backtests, jobs, events, overlay_elements, plot_points, "
                 "engine_runs, engine_configs, bars, datasets, instruments, prefs RESTART IDENTITY CASCADE"
             )
         )

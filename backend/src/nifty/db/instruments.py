@@ -25,14 +25,15 @@ def upsert_instrument(conn: Connection, ins: Instrument) -> None:
     )
 
 
-def find_by_symbol(conn: Connection, symbol: str) -> Instrument | None:
+def find_by_symbol(conn: Connection, symbol: str, provider: str | None = None) -> Instrument | None:
     row = (
         conn.execute(
             text(
                 "SELECT *, provider_meta AS pm FROM instruments "
-                "WHERE tradingsymbol = :s ORDER BY instrument_id LIMIT 1"
+                "WHERE tradingsymbol = :s AND (CAST(:p AS text) IS NULL OR provider = :p) "
+                "ORDER BY instrument_id LIMIT 1"
             ),
-            {"s": symbol},
+            {"s": symbol, "p": provider},
         )
         .mappings()
         .first()

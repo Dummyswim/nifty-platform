@@ -4,12 +4,16 @@ import json
 import sys
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Connection
 
 from nifty.contracts import TF_MINUTES, Instrument
 from nifty.security import hash_password
 from nifty.timeutil import Calendar, to_ist
+
+if TYPE_CHECKING:
+    from nifty.marketdata.kite.client import KiteClient
 
 
 def _hhmm(dt: datetime) -> str:
@@ -255,6 +259,132 @@ def _backtest_cli(a: argparse.Namespace) -> int:
     return 0
 
 
+def _kite_client(conn: Connection) -> "KiteClient":
+    from nifty.config import get_settings
+    from nifty.db.kite import client_for
+
+    return client_for(conn, get_settings())
+
+
+def _kite_instruments(a: argparse.Namespace) -> int:
+    from nifty.db.kite import save_master
+    from nifty.db.session import get_engine
+    from nifty.marketdata.base import ProviderError
+    from nifty.marketdata.kite.master import expiries, front_month_future, nifty_index, strike_step
+    from nifty.timeutil import utcnow
+
+    try:
+        with get_engine().begin() as conn:
+            version, ins = save_master(conn, _kite_client(conn).instruments())
+    except ProviderError as e:
+        print(f"FAIL {e}")
+        return 2
+    fut = front_month_future(ins, utcnow().date())
+    exp = expiries(ins, "CE")
+    idx = nifty_index(ins)
+    print(f"master {version}: {len(ins)} NIFTY instruments stored")
+    fut_name = fut.tradingsymbol if fut else "none"
+    print(f"index {idx.tradingsymbol if idx else 'MISSING'} · front-month future {fut_name}")
+    print(f"option expiries {len(exp)} · strike step {strike_step(ins, exp[0]) if exp else 'n/a'}")
+    return 0
+
+
+def _kite_backfill(a: argparse.Namespace) -> int:
+    from nifty.db.session import get_engine
+    from nifty.marketdata.base import ProviderError
+    from nifty.worker.handlers import kite_backfill
+
+    try:
+        with get_engine().begin() as conn:
+            print(
+                kite_backfill(
+                    conn, {"symbol": a.symbol, "from_date": a.from_date, "to_date": a.to_date}
+                )
+            )
+    except (ProviderError, ValueError) as e:
+        print(f"FAIL {e}")
+        return 2
+    return 0
+
+
+def _kite_smoke(a: argparse.Namespace) -> int:
+    """User-run live check. Prints PASS/FAIL/INFO lines; never a secret."""
+    from datetime import timedelta
+
+    from nifty.config import get_settings
+    from nifty.db.kite import load_token
+    from nifty.db.session import get_engine
+    from nifty.marketdata.base import ProviderError
+    from nifty.marketdata.kite.client import KiteClient
+    from nifty.marketdata.kite.master import nifty_index, parse_master
+    from nifty.timeutil import IST, utcnow
+
+    s = get_settings()
+    fails = 0
+
+    def line(ok: bool | None, msg: str) -> None:
+        nonlocal fails
+        fails += ok is False
+        print(("PASS" if ok else "FAIL" if ok is False else "INFO"), msg)
+
+    line(
+        bool(s.kite_api_key and s.kite_api_secret),
+        "credentials present in .env (key and secret set)",
+    )
+    with get_engine().connect() as conn:
+        token = load_token(conn, s.app_secret_key)
+    line(token is not None, "access token stored and unexpired (Settings -> Connect Kite)")
+    if not token or not s.kite_api_key:
+        return 2
+    client = KiteClient(s.kite_api_key, s.kite_api_secret, token)
+    try:
+        prof = client.profile()
+        line(True, f"profile ok (user_id {prof.get('user_id')})")
+        ins = parse_master(client.instruments(), "smoke")
+        idx = nifty_index(ins)
+        line(
+            idx is not None and len(ins) > 100,
+            f"instrument master: {len(ins)} NIFTY rows, index {'found' if idx else 'MISSING'}",
+        )
+        if idx is None or idx.provider_token is None:
+            return 2
+        day = utcnow().astimezone(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+        for back in range(1, 8):  # latest weekday with data
+            d0 = day - timedelta(days=back)
+            if d0.weekday() >= 5:
+                continue
+            c = client.historical(
+                idx.provider_token,
+                "minute",
+                d0.replace(hour=9, minute=15),
+                d0.replace(hour=15, minute=30),
+            )
+            if c:
+                line(
+                    len(c) > 300,
+                    f"1m candles for {d0:%Y-%m-%d}: {len(c)} (expect ~375); first {c[0][0]}",
+                )
+                break
+        else:
+            line(False, "no 1m candles for the last 7 days")
+        if a.probe_limits:
+            for n in (60, 61):
+                try:
+                    client.historical(
+                        idx.provider_token,
+                        "minute",
+                        day - timedelta(days=n),
+                        day - timedelta(days=1),
+                    )
+                    line(None, f"minute range of {n} days accepted")
+                except ProviderError as e:
+                    line(None, f"minute range of {n} days rejected: {e}")
+    except ProviderError as e:
+        line(False, f"{e}")
+    print("RESULT", "FAIL" if fails else "PASS")
+    return 1 if fails else 0
+
+
 def _parity(a: argparse.Namespace) -> int:
     from nifty.parity.cli import run_parity
 
@@ -306,6 +436,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--qty", type=float, default=1.0)
     p.add_argument("--cost-pts", type=float, default=0.0)
     p.add_argument("--params", help="JSON")
+    sub.add_parser("kite-instruments", help="download and store the Kite instrument master")
+    p = sub.add_parser("kite-backfill", help="fetch historical 1m candles from Kite")
+    p.add_argument("--symbol", default="NIFTY 50")
+    p.add_argument("--from", dest="from_date", required=True)
+    p.add_argument("--to", dest="to_date", required=True)
+    p = sub.add_parser("kite-smoke", help="live check, run by you after Connect Kite")
+    p.add_argument(
+        "--probe-limits", action="store_true", help="also test the 60/61-day minute range"
+    )
     p = sub.add_parser("parity", help="compare an engine with TradingView golden / the oracle")
     p.add_argument("--engine", required=True)
     p.add_argument("--golden", help="dir with ohlc_plots.csv and trades.csv")
@@ -332,6 +471,12 @@ def main(argv: list[str] | None = None) -> int:
         return _run_engine_cli(args)
     elif args.cmd == "backtest":
         return _backtest_cli(args)
+    elif args.cmd == "kite-instruments":
+        return _kite_instruments(args)
+    elif args.cmd == "kite-backfill":
+        return _kite_backfill(args)
+    elif args.cmd == "kite-smoke":
+        return _kite_smoke(args)
     elif args.cmd == "parity":
         return _parity(args)
     return 0
