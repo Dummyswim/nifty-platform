@@ -272,7 +272,8 @@ def run_batch(
     i = 0
     for cb in chart:
         while i < len(bars_1m) and bars_1m[i].bar_start_utc < cb.bar_end_utc:
-            run.ctx.append_1m(bars_1m[i])
+            if bars_1m[i].timeframe == "1m":  # chart-tf input (TV golden) has no aux 1m buffer
+                run.ctx.append_1m(bars_1m[i])
             i += 1
         run.on_chart_bar(cb)
     return run.result

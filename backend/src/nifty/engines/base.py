@@ -93,7 +93,7 @@ def list_engines(include_unready: bool = False) -> list[dict[str, Any]]:
     ]
 
 
-BUILTIN_ENGINE_MODULES: list[str] = []  # C03 adds nifty.engines.nvs, C09 balu, C13 research
+BUILTIN_ENGINE_MODULES: list[str] = ["nifty.engines.nvs"]  # C09 balu, C13 research
 
 
 def load_builtin_engines() -> None:

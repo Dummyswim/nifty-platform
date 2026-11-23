@@ -8,9 +8,9 @@ percent of fill value per side.
 Timestamps: open and intrabar-level fills use the bar start; close fills use the bar end.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from nifty.contracts import Bar, TradeRecord
 from nifty.execution.barriers import step_bar
@@ -93,6 +93,58 @@ class BrokerEmulator:
         if self._pos is None and not has_entry:
             return
         self._bracket = _Bracket(stop, limit, for_pending=self._pos is None or has_entry)
+
+    def cancel_entries(self) -> None:
+        """Drop queued (unfilled) entry orders and their bracket (script declines the fill)."""
+        self._pending = [o for o in self._pending if o.kind != "entry"]
+        if self._bracket is not None and self._bracket.for_pending:
+            self._bracket = None
+
+    # ---- snapshot (JSON-safe; datetimes as ISO) ------------------------------------------------
+    def state(self) -> dict[str, Any]:
+        def iso(t: datetime | None) -> str | None:
+            return t.isoformat() if t else None
+
+        pos = None
+        if self._pos is not None:
+            pos = asdict(self._pos)
+            pos["entry_time"] = iso(self._pos.entry_time)
+            pos["signal_bar_start"] = iso(self._pos.signal_bar_start)
+        return {
+            "pos": pos,
+            "visible": self._visible,
+            "n": self._n,
+            "pending": [
+                {"kind": o.kind, "side": o.side, "reason": o.reason, "sig": iso(o.signal_bar_start)}
+                for o in self._pending
+            ],
+            "bracket": asdict(self._bracket) if self._bracket else None,
+        }
+
+    def load(self, st: dict[str, Any]) -> None:
+        def dt(x: str | None) -> datetime | None:
+            return datetime.fromisoformat(x) if x else None
+
+        p = st["pos"]
+        self._pos = (
+            None
+            if p is None
+            else Position(
+                p["side"],
+                p["qty"],
+                p["entry_px"],
+                datetime.fromisoformat(p["entry_time"]),
+                dt(p["signal_bar_start"]),
+                p["bars_held"],
+                p["mae"],
+                p["mfe"],
+            )  # fmt: skip
+        )
+        self._visible, self._n = st["visible"], st["n"]
+        self._pending = [
+            _Order(o["kind"], o["side"], o["reason"], dt(o["sig"])) for o in st["pending"]
+        ]
+        self._bracket = _Bracket(**st["bracket"]) if st["bracket"] else None
 
     # ---- per-bar processing ---------------------------------------------------------------
     def on_bar(self, bar: Bar) -> list[TradeRecord]:

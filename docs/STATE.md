@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C03
-last_update: 2026-11-23 (C02)
+next_chunk: C04
+last_update: 2026-11-23 (C03)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -10,7 +10,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C00 | done | scaffold, compose, make tools |
 | C01 | done | data core, CSV replay |
 | C02 | done | engine framework, pinekit, broker emulator |
-| C03 | pending | NVS port |
+| C03 | done | NVS port, parity harness |
 | C04 | pending | backtests, audit, analytics, export |
 | C05 | pending | UI chart core |
 | C06 | pending | UI indicators, replay, audit/analytics (MVP) |
@@ -45,11 +45,15 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Execution: `resolve_barriers(side, entry_px, stop_px, target_px, bars, max_hold_bars, mode, cost_pts=0.0) -> Resolution{exit_idx, exit_px, reason TARGET|STOP|TIME, flags, mae_pts, mfe_pts, bars_held, gross_pts, cost_pts, net_pts}`; `step_bar(...)`. `BrokerEmulator(engine_id, instrument_id, qty=1, commission_pct=0)`: `on_bar(bar)->[TradeRecord]` (call BEFORE the script), `entry(side, signal_bar_start, reason)`, `close(reason, immediately=False)`, `close_all(...)`, `exit(stop=None, limit=None)`, `.position` (script-visible), `.actual_position`
 - DB (rev 0003): tables `engine_configs engine_runs plot_points events overlay_elements` (events/overlays carry `ord` = emission order). `nifty.db.runs`: `persist_run(conn, RunResult)->(run_id, created)`, `find_run`, `load_plots`, `load_events(conn, run_id, available_by=None)`, `load_overlays(...)`. Run key = sha256(engine|version|config_hash|source_id|timeframe). `run-engine` and `snapshot` share `nifty.cli.session_range` (inclusive session dates; omitted => first/last stored bar's session), so they produce the same snapshot_id
 - CLI: `run-engine --engine ID --symbol S [--timeframe] [--from --to] [--params JSON|@file] [--no-persist] [--allow-unready]` (function `nifty.cli.run_engine(conn, ...)`). No production engine exists yet, so it cannot be run by hand until C03; covered by DB tests with `test.sma_cross`
-- Make targets implemented: up down ps logs check test migrate db-q bars init-env hash-password api-types. Stubs (exit 2): parity bench e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
+- NVS (C03): engine `pine.nvs_scalper` v1, `nifty.engines.nvs` (`NvsScalper`, `NvsParams` in `params.py`; registered `ready=True`, listed in `BUILTIN_ENGINE_MODULES`). Doc `docs/engines/nvs.md`. Engine owns a `BrokerEmulator` (calls `on_bar` first); emits trades in `EngineOutput.trades`. Emulator gained `state()/load()` (snapshot) and `cancel_entries()`.
+- Parity (`nifty.parity`): `tv_io` (`RefTrade`, `load_tv_ohlc_plots`, `tv_bars`, `load_tv_trades`, `load_oracle_trades`, `parse_time`), `compare` (`tier_a(ours_plots, golden{series:{ts:v}}, warmup)`, `tier_bc(trades, ref, tf, px_tol, exit_px_tol)->TierBC{entries_ok, exits_ok, diffs}`), `cli.run_parity(engine, golden, oracle)`; `SERIES` maps TV plot titles -> engine plots per engine (add Balu in C09). CLI `python -m nifty.cli parity --engine ID [--golden DIR] [--oracle PATH]`; `make parity E=<id> [G=dir]`. Golden dir default `fixtures/tv_golden/<engine_id>`, falls back to `.../nvs` (RUNBOOK name).
+- Make targets implemented: up down ps logs check test migrate db-q bars parity init-env hash-password api-types. Stubs (exit 2): bench e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C03: Pine L278 `barstate.isconfirmed` (missing from the port map) is honoured: no `signal` while `ctx.provisional`. `run_batch` skips the 1m aux buffer when fed chart-tf bars (TV golden input). `docs/prompts/` (untracked user copy of C03) left alone.
+- C03: golden dir `fixtures/tv_golden/<engine_id>` (spec/04) and RUNBOOK's `.../nvs` both accepted. NVS plot `buy/sell_near/far` are always computed (the Pine `showBands` toggle is UI only). `volume_kind=absent` forces TWAP even if a volume value is present. Stop/target overlay lines show the INITIAL levels; BE ratchets are `stop_update` events.
 - Chart bars handed to engines carry NO `quality_flags` (partial/gap flags use later data = lookahead and differ batch vs incremental). Engines see `volume_kind` and finalized bars only; flags remain on stored/resampled bars.
 - D07 run key includes `timeframe` (config_hash does not cover it). Trades are not persisted in C02 (C04 `trades`).
 - Tests live in `backend/tests/unit/{engines,execution,contracts}/`; `make test T=backend/tests/...` strips the `backend/` prefix. Test engine `test.sma_cross` is in `backend/tests/sma_cross_engine.py` (registered only inside tests).
@@ -71,6 +75,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
+- golden_tv=none: NVS golden not exported yet; `make parity` prints `golden missing` for it. Export steps: RUNBOOK §Golden (user to confirm when files exist).
 - Golden decides (log result in STATE when C03/C09 compare): `ema_seed` (default 'first'), rsi both-zero (100), `pivot_ties` (default), `round_to_mintick` epsilon.
 - Provisional events: the id is the same for every 1m update of one (bar, type, seq) slot, so consumers (C08) must treat a repeated id as 'replace with the latest update'; `available_at_utc` is that update's 1m bar end.
 - Provisional plots/events are kept on `RunResult.provisional` only; not persisted.
@@ -80,8 +85,11 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Deferred (no Docker): `docker compose config -q`, image pulls/tags, `make up`/`down`/`db-q` (db-q is Docker-only; use `psql "${DATABASE_URL/+psycopg/}"`). Compose stack untested.
 - `python -m nifty.worker` / `nifty.collector` (compose profiles) have no entrypoints until C04/C08.
 - AGENTS.md still names the Mac venv; user may want to update it.
+- NVS: `anchor_mode=fill_price` is the twin's convention but is not exercised against the oracle (decline rule uses 1.25*maxRisk like the twin; stop stays mintick-rounded).
 
 ## Facts discovered (environment, data, Kite; keep short)
+- Oracle conventions (twin `vwap_scalper.py`): `entry_ts` = FILL bar start (signal at the previous close); `exit_ts` = bar start of the bar that exited (EOD/SESSION_END stamped at the signalling bar start, emulator stamps bar END); `resample` is session-anchored at 09:15 and KEEPS a trailing partial bucket (we drop it: only finalized bars reach engines; 11-16 14:45 bar, no trade affected). Twin trade prices are fill-anchored and unrounded; Pine anchors to the signal close and rounds to mintick.
+- NVS vs oracle (5m, tv, signal_close): entries 15/15, exits 14/15 (11-03 TP fires 2 bars later than twin, target anchoring). `make check` green (20 NVS tests incl. prefix immunity and a golden-file round trip with synthetic TV exports).
 - Native DB verified 2026-11-23: `make migrate` -> rev 0001, timescaledb ext + prefs present, `nifty_test` DB test passes, live /healthz 200, /readyz 200, /auth/me 401 unauth. Needed PGDG repo for pg 18.7 (Ubuntu has 18.6; Timescale 2.32 needs >=18.7). Role is SUPERUSER (dev only).
 - WSL Ubuntu 26.04, Python 3.14.4, node 22.22, npm 9.2; apt offers postgresql 18, redis 8.0; timescaledb needs Timescale's apt repo.
 - Resolved deps (3.14 wheels all available): fastapi 0.165, sqlalchemy 2.1.9, alembic 1.20, pydantic 2.14, psycopg 3.3.9, numpy 2.5, pandas 3.1.

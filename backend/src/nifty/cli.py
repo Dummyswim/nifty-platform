@@ -212,6 +212,16 @@ def _run_engine_cli(a: argparse.Namespace) -> int:
     return 0 if lines and not lines[0].startswith(("unknown", "refused", "no ")) else 2
 
 
+def _parity(a: argparse.Namespace) -> int:
+    from nifty.parity.cli import run_parity
+
+    lines, rc = run_parity(
+        a.engine, Path(a.golden) if a.golden else None, Path(a.oracle) if a.oracle else None
+    )
+    print("\n".join(lines))
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="nifty")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -241,6 +251,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--params", help="JSON or @file")
     p.add_argument("--no-persist", action="store_true")
     p.add_argument("--allow-unready", action="store_true")
+    p = sub.add_parser("parity", help="compare an engine with TradingView golden / the oracle")
+    p.add_argument("--engine", required=True)
+    p.add_argument("--golden", help="dir with ohlc_plots.csv and trades.csv")
+    p.add_argument("--oracle", help="twin trade log (default: reference/oracle/logs)")
     args = ap.parse_args(argv)
     if args.cmd == "hash-password":
         pw = getpass.getpass("Password: ")
@@ -261,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         return _snapshot(args)
     elif args.cmd == "run-engine":
         return _run_engine_cli(args)
+    elif args.cmd == "parity":
+        return _parity(args)
     return 0
 
 
