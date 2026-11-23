@@ -3,25 +3,22 @@
 import csv
 import io
 import json
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy import Connection, Engine, text
 
 from nifty.cli import format_metrics
 from nifty.contracts import Instrument
 from nifty.db.backtests import BacktestError, get_backtest, load_trades, run_backtest
 from nifty.db.bars import upsert_bars
 from nifty.db.instruments import upsert_instrument
-from nifty.db.session import get_engine
 from nifty.marketdata.importer import parse_csv
 from nifty.marketdata.validation import validate_bars
 from nifty.worker import process_one
 from tests.conftest import ORIGIN
 from tests.helpers import CAL, ORACLE
-from tests.test_db_jobs import TABLES
 
 pytestmark = pytest.mark.db
 SYMBOL = "NIFTY 50"
@@ -67,28 +64,6 @@ def test_mode_rules(seeded: Connection) -> None:
         run_backtest(seeded, {**BT, "cost_pts": 1.0})
     with pytest.raises(BacktestError, match="unknown symbol"):
         run_backtest(seeded, {**BT, "symbol": "NOPE"})
-
-
-@pytest.fixture
-def api(
-    migrated_url: str, client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[TestClient, Engine]]:
-    monkeypatch.setenv("DATABASE_URL", migrated_url)
-    get_engine.cache_clear()
-    eng = create_engine(migrated_url)
-    with eng.begin() as c:
-        c.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
-    assert (
-        client.post(
-            "/api/v1/auth/login", json={"password": "correct horse"}, headers={"Origin": ORIGIN}
-        ).status_code
-        == 200
-    )
-    yield client, eng
-    with eng.begin() as c:
-        c.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
-    eng.dispose()
-    get_engine.cache_clear()
 
 
 def test_api_job_flow(api: tuple[TestClient, Engine]) -> None:

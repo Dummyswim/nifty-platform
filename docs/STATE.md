@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C05
-last_update: 2026-11-23 (C04)
+next_chunk: C06
+last_update: 2026-11-23 (C05)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -12,7 +12,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C02 | done | engine framework, pinekit, broker emulator |
 | C03 | done | NVS port, parity harness |
 | C04 | done | jobs, worker, backtests, analytics, export, API, bench |
-| C05 | pending | UI chart core |
+| C05 | done | UI chart core, drawings, login, e2e |
 | C06 | pending | UI indicators, replay, audit/analytics (MVP) |
 | C07 | pending | Kite REST + instrument master |
 | C08 | pending | Kite live collector + live engine runner |
@@ -52,11 +52,16 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Metrics (`nifty.analytics.metrics.compute_metrics(trades, session_of, sessions=None)`): win = net>0 (flat breaks streaks); win_rate fraction; profit_factor null + `no_losses`; expectancy_pts = mean; max_drawdown_pts = peak-to-trough of cumulative net in exit order (peak starts 0); sharpe = mean/sample-stdev of per-session net_pts * sqrt(252), rf 0, sessions = every session of the tested bars (zero-trade = 0), `n_sessions`, `low_n` (<30), flags `low_n|no_losses|zero_variance`. Export `nifty.analytics.export` (csv/json/xlsx, unit-suffixed headers, strike/option null for index trades).
 - API (`nifty.api.routes`, all under /api/v1, cookie required, POST checks Origin): GET `engines`; POST `engines/{id}/run` (202, job); GET `jobs/{id}` (+`backtest_id`); POST/GET `backtests`, GET `backtests/{id}`, `/trades`, `/analytics`, `/audit/{trade_id}?window=N`, `/export?fmt=csv|xlsx|json`; GET `plots|events|overlays` by `run_id` or `engine_id+snapshot_id[+timeframe+config_hash]` (+`available_by`); POST `datasets/import?symbol&tick_size&tz&dry_run` with the raw file as body (text/csv or application/json, 25 MB). `make api-types` regenerated.
 - Bench (`make bench`, tools/bench.py, SYNTHETIC tiled oracle sessions, 100,099 1m bars, NVS 5m, WSL2): batch 84k 1m bars/s (17k chart bars/s, 1.2 s), incremental 46k/s (2.2 s), peak RSS 264 MB. Not tuned.
-- Make targets implemented: up down ps logs check test migrate db-q bars parity bench init-env hash-password api-types. Stub (exit 2): e2e. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
+- Chart API (`nifty.api.chart_routes`, rev 0005 `drawings`; typed, in `web/src/api/schemas.ts`): GET `instruments`; GET `bars?symbol&tf&from&to&limit(5000, max 20000)&cursor` -> columnar `{t (UTC epoch s), o,h,l,c,v, flags, volume_kind, next_cursor}`; `cursor` = exclusive upper bound = previous `next_cursor` (oldest bar start), null when no more; the newest (possibly partial) bucket is included. Higher TFs resampled on the fly from 1m (`nifty.db.chart.bars_page`; reads limit x bucket-minutes 1m rows, so cost grows with limit x TF; oracle limit=5000: 1m 61 ms, 5m 120 ms, 1h 77 ms, 1d 73 ms; no cache yet; when the 1m read hits its window the oldest bucket is dropped). GET `prefs`, PUT `prefs/{key}` {value}; GET/POST `drawings`, PUT/DELETE `drawings/{id}` (POST/PUT/DELETE check Origin).
+- Drawing storage: table `drawings(id drw_*, user_id, instrument_id, kind trendline|hline|rect|text, data jsonb)`; `data = {points:[{t: UTC epoch s, p: price}] (1 point for hline/text, 2 otherwise), text?, color?}`. Rendered via logical-index interpolation (`timeToLogical`), so a 1m drawing keeps its place on any TF. Prefs key `chart` = {symbol, tf}.
+- Web: `ChartView` props `{symbol, tf, tool: select|trendline|hline|rect|text, drawings: DrawingOut[], onCreate(kind,data), onUpdate(id,data), onDelete(id), onToolDone()}`; DOM hooks `data-testid=chart` with `data-bars/data-tf/data-symbol/data-drawings`, `legend`, `legend-c`. Pure maths in `chart/geometry.ts` (+ vitest), custom series primitive `chart/primitives.ts`. Chart page is lazy-loaded; Settings is a shell (Kite placeholder). lightweight-charts v5, zustand store `src/store.ts`.
+- e2e: `make e2e` = `tools/e2e_run.py` (seeds/migrates/truncates `nifty_test` with the oracle CSV, builds the SPA, starts uvicorn + `vite preview` on free ports with a temp password, runs `web/e2e/smoke.spec.ts`; `E2E_SHOT=<png>` saves a 1280x800 screenshot). Never run it concurrently with pytest (same DB). Chromium needs 4 system libs; without sudo they are extracted into gitignored `tools/.e2e-libs` (recipe in the script docstring).
+- Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C05: added deps `lightweight-charts@5`, `@playwright/test`; chromium system libs (libnspr4, libnss3, libasound2t64) came from `apt-get download` extracted into `tools/.e2e-libs` (no sudo; avoided the ASK). Shared `api` fixture + `TABLES` moved into tests/conftest.py. `run_batch` skips the 1m aux buffer for non-1m input. No router dependency (page state in zustand). Drawing text is edited only at creation (window.prompt); no edit-in-place yet. Volume pane code exists but is untested in the browser (the oracle has `volume_kind=absent`).
 - C04: `datasets/import` takes the raw file as the request body (no multipart: python-multipart is not a listed dependency). `openpyxl` added to pyproject (chunk-listed); mypy ignores its missing stubs. Sharpe/audit/metric definitions as in Interfaces. Trades persisted for the NVS tv mode only (index points); option fields stay null until C12. `engine_run` jobs persist a run without a backtest.
 - C04 acceptance numbers: NVS on the oracle = 15 trades, net -23.74 pts vs twin -13.75: costs match (88.99 vs 88.98; 0.0125 %/side = 2.5 bps round trip) and the ~10 pts gross gap is the stop/target anchoring (signal close + mintick rounding vs fill-anchored, unrounded).
 - C03: Pine L278 `barstate.isconfirmed` (missing from the port map) is honoured: no `signal` while `ctx.provisional`. `run_batch` skips the 1m aux buffer when fed chart-tf bars (TV golden input). `docs/prompts/` (untracked user copy of C03) left alone.

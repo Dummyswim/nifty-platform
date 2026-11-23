@@ -9,9 +9,9 @@ from sqlalchemy import Connection, Engine, create_engine, text
 from nifty.db.jobs import claim_job, fail_job, finish_job, get_job, requeue_stale, submit_job
 from nifty.worker import process_one
 from nifty.worker.handlers import Handler
+from tests.conftest import TABLES
 
 pytestmark = pytest.mark.db
-TABLES = "trades, backtests, jobs, events, overlay_elements, plot_points, engine_runs, engine_configs, bars, datasets, instruments"
 
 
 @pytest.fixture

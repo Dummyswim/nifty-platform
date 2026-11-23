@@ -6,15 +6,17 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 
 from nifty.api.main import create_app
 from nifty.config import get_settings
+from nifty.db.session import get_engine
 from nifty.security import hash_password
 
 ORIGIN = "http://127.0.0.1:8080"
+TABLES = "drawings, trades, backtests, jobs, events, overlay_elements, plot_points, engine_runs, engine_configs, bars, datasets, instruments"
 ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
 
 
@@ -80,3 +82,25 @@ def sma_engine() -> Iterator[None]:
 
     with registered():
         yield
+
+
+@pytest.fixture
+def api(
+    migrated_url: str, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, Engine]]:
+    monkeypatch.setenv("DATABASE_URL", migrated_url)
+    get_engine.cache_clear()
+    eng = create_engine(migrated_url)
+    with eng.begin() as c:
+        c.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
+    assert (
+        client.post(
+            "/api/v1/auth/login", json={"password": "correct horse"}, headers={"Origin": ORIGIN}
+        ).status_code
+        == 200
+    )
+    yield client, eng
+    with eng.begin() as c:
+        c.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
+    eng.dispose()
+    get_engine.cache_clear()

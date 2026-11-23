@@ -1,16 +1,47 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api/client";
-import { Chart } from "./pages/Chart";
 import { Login } from "./pages/Login";
+import { Settings } from "./pages/Settings";
+import { type Page, useUi } from "./store";
+import "./styles.css";
 
-const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const Chart = lazy(() => import("./pages/Chart").then((m) => ({ default: m.Chart })));
+const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+
+function Shell({ onLogout }: { onLogout: () => void }) {
+  const { page, set } = useUi();
+  const tab = (id: Page, label: string) => (
+    <button className={page === id ? "on" : ""} aria-current={page === id ? "page" : undefined} onClick={() => set({ page: id })}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="shell">
+      <header>
+        <span className="brand">NIFTY</span>
+        <nav>
+          {tab("chart", "Chart")}
+          {tab("settings", "Settings")}
+        </nav>
+        <button className="ghost" onClick={onLogout}>
+          Sign out
+        </button>
+      </header>
+      <Suspense fallback={<p className="muted pad">Loading chart…</p>}>
+        {page === "chart" ? <Chart /> : <Settings />}
+      </Suspense>
+    </div>
+  );
+}
 
 function App() {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api<{ user_id: number }>("/auth/me") });
-  if (me.isLoading) return <p>Loading…</p>;
-  return me.isSuccess ? <Chart /> : <Login onDone={() => void me.refetch()} />;
+  if (me.isLoading) return <p className="muted pad">Loading…</p>;
+  if (!me.isSuccess) return <Login onDone={() => void me.refetch()} />;
+  const logout = () => void api("/auth/logout", { method: "POST", body: {} }).finally(() => { qc.clear(); window.location.reload(); });
+  return <Shell onLogout={logout} />;
 }
 
 createRoot(document.getElementById("root")!).render(

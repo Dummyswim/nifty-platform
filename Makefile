@@ -60,8 +60,6 @@ api-types:
 	@$(PY) -m nifty.cli openapi > web/src/api/openapi.json
 	@cd web && npx openapi-typescript src/api/openapi.json -o src/api/types.ts 2>&1 | tail -n 5
 
-e2e:
-	@echo "not available until Cxx ($@)"; exit 2
 
 parity:
 	@test -n "$(E)" || { echo "usage: make parity E=<engine_id> [G=<golden dir>]"; exit 2; }
@@ -69,3 +67,6 @@ parity:
 
 bench:
 	@$(PY) tools/bench.py
+
+e2e:
+	@$(PY) tools/e2e_run.py
