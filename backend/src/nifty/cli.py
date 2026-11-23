@@ -385,6 +385,15 @@ def _kite_smoke(a: argparse.Namespace) -> int:
     return 1 if fails else 0
 
 
+def _demo_replay(a: argparse.Namespace) -> int:
+    import logging
+
+    from nifty.collector.demo import run_demo
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    return run_demo(a.speed, a.max_sessions, a.from_date, not a.exit_at_end)
+
+
 def _parity(a: argparse.Namespace) -> int:
     from nifty.parity.cli import run_parity
 
@@ -445,6 +454,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--probe-limits", action="store_true", help="also test the 60/61-day minute range"
     )
+    p = sub.add_parser(
+        "demo-replay", help="replay the oracle sessions as live ticks (demo:NIFTY 50)"
+    )
+    p.add_argument("--speed", type=float, default=200.0, help="times real speed")
+    p.add_argument("--max-sessions", type=int)
+    p.add_argument("--from", dest="from_date", help="first session date")
+    p.add_argument(
+        "--exit-at-end", action="store_true", help="exit when the replay ends (default: hold)"
+    )
     p = sub.add_parser("parity", help="compare an engine with TradingView golden / the oracle")
     p.add_argument("--engine", required=True)
     p.add_argument("--golden", help="dir with ohlc_plots.csv and trades.csv")
@@ -477,6 +495,8 @@ def main(argv: list[str] | None = None) -> int:
         return _kite_backfill(args)
     elif args.cmd == "kite-smoke":
         return _kite_smoke(args)
+    elif args.cmd == "demo-replay":
+        return _demo_replay(args)
     elif args.cmd == "parity":
         return _parity(args)
     return 0

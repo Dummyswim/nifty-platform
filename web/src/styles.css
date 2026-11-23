@@ -57,3 +57,5 @@ a.btn { background: #1a2133; border: 1px solid var(--line); border-radius: 6px; 
 .drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 380px; z-index: 20; background: var(--panel); border-left: 1px solid var(--line); padding: 16px; overflow: auto; box-shadow: -10px 0 40px #0008; }
 .drawer header { display: flex; justify-content: space-between; align-items: center; } .drawer dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; } .drawer dt { color: var(--muted); } .drawer dd { margin: 0; }
 .echart { height: 240px; width: 100%; background: var(--panel); border-radius: 10px; }
+.banner { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 4px 14px; border-radius: 999px; font-size: 12px; display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); background: #121724ee; }
+.banner.ok { color: #6fd0b8; border-color: #1f6f5e; } .banner.warn { color: #f5a623; border-color: #7a5a1a; } .banner.error { color: #ff8a8a; border-color: #8a2f2f; }

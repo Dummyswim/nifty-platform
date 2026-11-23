@@ -79,7 +79,8 @@ def list_instruments(conn: Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         text(
             "SELECT instrument_id, tradingsymbol, instrument_type, tick_size, lot_size "
-            "FROM instruments ORDER BY tradingsymbol"
+            "FROM instruments i WHERE EXISTS (SELECT 1 FROM bars b WHERE b.instrument_id = i.instrument_id) "
+            "ORDER BY tradingsymbol, instrument_id"
         )
     ).mappings()
     return [dict(r) for r in rows]

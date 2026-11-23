@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi", "uvicorn[standard]", "pydantic", "pydantic-settings",
   "sqlalchemy>=2", "alembic", "psycopg[binary]", "httpx", "websockets",
-  "numpy", "pandas", "pyyaml", "openpyxl", "cryptography",
+  "numpy", "pandas", "pyyaml", "openpyxl", "cryptography", "redis",
 ]
 
 [project.optional-dependencies]

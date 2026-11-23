@@ -418,6 +418,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collector/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Collector Status */
+        get: operations["collector_status_api_v1_collector_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/kite/login-url": {
         parameters: {
             query?: never;
@@ -673,6 +690,48 @@ export interface components {
              * @description pass as `cursor` to load older bars
              */
             next_cursor?: number | null;
+        };
+        /** CollectorStatusOut */
+        CollectorStatusOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "live" | "stale" | "disconnected" | "auth_expired" | "down";
+            /** Connected */
+            connected: boolean;
+            /** Stale */
+            stale: boolean;
+            /** Auth Expired */
+            auth_expired: boolean;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Provider */
+            provider?: string | null;
+            /** Instruments */
+            instruments?: string[];
+            /**
+             * Ticks
+             * @default 0
+             */
+            ticks: number;
+            /**
+             * Reconnects
+             * @default 0
+             */
+            reconnects: number;
+            /**
+             * Redis
+             * @default false
+             */
+            redis: boolean;
+            /** Last Tick Age S */
+            last_tick_age_s?: number | null;
+            /** Updated Age S */
+            updated_age_s?: number | null;
         };
         /** DrawingData */
         DrawingData: {
@@ -1981,6 +2040,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collector_status_api_v1_collector_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorStatusOut"];
                 };
             };
         };

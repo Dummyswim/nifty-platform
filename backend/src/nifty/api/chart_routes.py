@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from nifty.api.auth import check_origin, require_user
 from nifty.db import chart
-from nifty.db.instruments import find_by_symbol
+from nifty.db.instruments import find_instrument
 from nifty.db.session import get_engine
 from nifty.timeutil import Calendar
 
@@ -67,7 +67,7 @@ class PrefIn(BaseModel):
 
 def _instrument_id(symbol: str) -> str:
     with get_engine().connect() as c:
-        ins = find_by_symbol(c, symbol)
+        ins = find_instrument(c, symbol)
     if ins is None:
         raise HTTPException(404, f"unknown symbol {symbol!r}")
     return ins.instrument_id
@@ -138,3 +138,26 @@ def delete_drawing(did: str) -> dict[str, bool]:
         if not chart.delete_drawing(c, did):
             raise HTTPException(404, "drawing not found")
     return {"ok": True}
+
+
+class CollectorStatusOut(BaseModel):
+    state: Literal["live", "stale", "disconnected", "auth_expired", "down"]
+    connected: bool
+    stale: bool
+    auth_expired: bool
+    detail: str = ""
+    provider: str | None = None
+    instruments: list[str] = Field(default_factory=list)
+    ticks: int = 0
+    reconnects: int = 0
+    redis: bool = False
+    last_tick_age_s: float | None = None
+    updated_age_s: float | None = None
+
+
+@router.get("/collector/status", response_model=CollectorStatusOut)
+def collector_status() -> dict[str, Any]:
+    from nifty.db.live import read_status, status_summary
+
+    with get_engine().connect() as c:
+        return status_summary(read_status(c))

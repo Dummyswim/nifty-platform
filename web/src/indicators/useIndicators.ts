@@ -36,7 +36,7 @@ export function fieldsOf(engine: EngineOut): Field[] {
   return fieldsFromSchema(engine.params_schema as Schema);
 }
 
-export function useIndicators(symbol: string) {
+export function useIndicators(symbol: string, live: { source: string; version: number } | null = null) {
   const qc = useQueryClient();
   const engines = useQuery({ queryKey: ["engines"], queryFn: () => api<EngineOut[]>("/engines") });
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
@@ -66,8 +66,11 @@ export function useIndicators(symbol: string) {
   const runKey = (e: EngineOut) => paramsForRun(fieldsOf(e), state[e.id]!.params);
   const runs = useQueries({
     queries: active.map((e) => ({
-      queryKey: ["run", e.id, symbol, JSON.stringify(runKey(e))],
-      queryFn: () => runEngine(e, symbol, runKey(e)),
+      queryKey: ["run", e.id, symbol, JSON.stringify(runKey(e)), live?.source ?? "", live?.version ?? 0],
+      // live: the collector's own run (source live:<instrument>), refetched when the server says outputs changed
+      queryFn: live
+        ? () => api<PlotsOut>(`/plots?engine_id=${e.id}&snapshot_id=${encodeURIComponent(live.source)}&timeframe=${e.default_timeframe}`).then((p) => p.run_id)
+        : () => runEngine(e, symbol, runKey(e)),
       staleTime: Infinity,
     })),
   });
@@ -75,7 +78,7 @@ export function useIndicators(symbol: string) {
   const outs = useQueries({
     queries: ready.flatMap(({ runId }) =>
       (["plots", "events", "overlays"] as const).map((k) => ({
-        queryKey: [k, runId],
+        queryKey: [k, runId, live?.version ?? 0],
         queryFn: () => api<PlotsOut | EventsOut | OverlaysOut>(`/${k}?run_id=${runId}`),
         enabled: !!runId,
         staleTime: Infinity,
@@ -104,5 +107,6 @@ export function useIndicators(symbol: string) {
     return c;
   }, [active, state]);
 
-  return { engines: engines.data ?? [], state, update, status, layers, overlays, panels, colors };
+  const enabledIds = active.map((e) => e.id);
+  return { engines: engines.data ?? [], state, update, status, layers, overlays, panels, colors, enabledIds };
 }

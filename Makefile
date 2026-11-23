@@ -12,7 +12,7 @@ define step
 @out=$$($(2) 2>&1); rc=$$?; if [ $$rc -ne 0 ]; then echo "FAIL: $(1)"; echo "$$out" | head -n 15; exit $$rc; else echo "ok: $(1)"; fi
 endef
 
-.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke
+.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke live demo
 
 up:
 	@$(COMPOSE) up -d --build
@@ -73,3 +73,9 @@ e2e:
 
 kite-smoke:
 	@cd backend && $(PY) -m nifty.cli kite-smoke $(ARGS)
+
+live:
+	@cd backend && $(PY) -m nifty.collector
+
+demo:
+	@cd backend && $(PY) -m nifty.cli demo-replay --speed $(or $(SPEED),200)

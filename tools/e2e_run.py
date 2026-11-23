@@ -59,7 +59,7 @@ def seed() -> str:
         command.upgrade(cfg, "head")
         conn.execute(
             text(
-                "TRUNCATE kite_tokens, instrument_masters, drawings, trades, backtests, jobs, events, overlay_elements, plot_points, "
+                "TRUNCATE collector_status, ticks, kite_tokens, instrument_masters, drawings, trades, backtests, jobs, events, overlay_elements, plot_points, "
                 "engine_runs, engine_configs, bars, datasets, instruments, prefs RESTART IDENTITY CASCADE"
             )
         )
@@ -122,7 +122,8 @@ def main() -> int:
         start(["npx", "vite", "preview", "--host", "127.0.0.1", "--port", str(web_port), "--strictPort"], web)
         wait(f"http://127.0.0.1:{api_port}/readyz")
         wait(origin + "/")
-        run_env = {**env, "E2E_BASE": origin, "E2E_PASSWORD": password}
+        run_env = {**env, "E2E_BASE": origin, "E2E_PASSWORD": password, "E2E_PY": sys.executable,
+                   "E2E_BACKEND": str(REPO / "backend")}  # fmt: skip
         libs = REPO / "tools" / ".e2e-libs" / "usr" / "lib" / "x86_64-linux-gnu"
         if libs.is_dir():  # chromium libs fetched without root, see docstring
             run_env["LD_LIBRARY_PATH"] = f"{libs}:{os.environ.get('LD_LIBRARY_PATH', '')}"

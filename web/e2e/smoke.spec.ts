@@ -67,7 +67,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByRole("button", { name: "Step forward" }).click();
   await expect(chart).toHaveAttribute("data-shown", String(shown + 1)); // one bar at a time
   await expect(chart).toHaveAttribute("data-entry-markers", "1");
-  await page.getByRole("button", { name: "Live" }).click();
+  await page.getByRole("button", { name: "Exit replay" }).click();
   await expect(chart).toHaveAttribute("data-entry-markers", "15");
   await expect(page.getByTestId("replay-badge")).toHaveCount(0);
 

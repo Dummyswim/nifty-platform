@@ -26,6 +26,7 @@ import { type PlotLayer, revealPlot, splitRuns } from "../overlay/layers";
 import { type El, pickOverlays } from "../overlay/pick";
 import { OverlayPrimitive } from "../overlay/primitive";
 import { TF_SEC, visibleCount } from "../replay/logic";
+import { type LiveBars, candleStyle, mergeLive } from "../live/messages";
 
 export type Tool = "select" | DrawingKind;
 
@@ -47,6 +48,8 @@ export interface ChartViewProps {
   focus?: { from: number; to: number; nonce: number } | null;
   /** called with the loaded bar start times (ascending) whenever they change */
   onTimes?: (times: number[]) => void;
+  /** live bars from the WebSocket (replace-by-time); provisional candles are drawn hollow */
+  liveBars?: { seq: number; data: LiveBars; provisional: boolean } | null;
 }
 
 const PAGE = 5000;
@@ -60,7 +63,7 @@ interface Legend { t: number; o: number; h: number; l: number; c: number; v: num
 
 export function ChartView({
   symbol, tf, tool, drawings, onCreate, onUpdate, onDelete, onToolDone,
-  plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes,
+  plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes, liveBars = null,
 }: ChartViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -208,6 +211,34 @@ export function ChartView({
     const last = n - 1;
     if (last >= 0) setLegend({ t: c.t[last]!, o: c.o[last]!, h: c.h[last]!, l: c.l[last]!, c: c.c[last]!, v: c.v[last]! });
   }, [cursor, tf]);
+
+  // live: merge WS bars into the data (replace by time), update the chart incrementally
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!liveBars || !series) return;
+    const before = cols.current;
+    const lastT = before.t.length ? before.t[before.t.length - 1]! : 0;
+    const merged = mergeLive(before, liveBars.data);
+    cols.current = merged;
+    const m = liveBars.data;
+    const hasOld = m.t.some((t) => t < lastT && before.t.indexOf(t) < 0);
+    if (hasOld || before.t.length === 0) {
+      series.setData(candles(merged));
+    } else {
+      m.t.forEach((t, k) => {
+        if (t < lastT) return; // history is already drawn; only the forming/new bars change
+        const up = m.c[k]! >= m.o[k]!;
+        const prov = liveBars.provisional || m.final[k] === false;
+        series.update({ time: t as UTCTimestamp, open: m.o[k]!, high: m.h[k]!, low: m.l[k]!, close: m.c[k]!, ...candleStyle(up, prov) });
+        volRef.current?.update({ time: t as UTCTimestamp, value: m.v[k]!, color: up ? "#26a69a66" : "#ef535066" });
+      });
+    }
+    onTimesRef.current?.(merged.t);
+    setNBars(merged.t.length);
+    const i = merged.t.length - 1;
+    if (i >= 0) setLegend({ t: merged.t[i]!, o: merged.o[i]!, h: merged.h[i]!, l: merged.l[i]!, c: merged.c[i]!, v: merged.v[i]! });
+    refresh();
+  }, [liveBars?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // engine plots as series (line/step/hist/area; overlay pane or own pane). Step plots are drawn as
   // one series per contiguous run so a trade's stop/target does not connect to the next trade's.

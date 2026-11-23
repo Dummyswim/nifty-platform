@@ -56,3 +56,8 @@ def get_instrument(conn: Connection, instrument_id: str) -> Instrument | None:
     if row is None:
         return None
     return Instrument(**{c: row[c] for c in _COLS}, provider_meta=row["pm"] or {})
+
+
+def find_instrument(conn: Connection, symbol: str) -> Instrument | None:
+    """By exact instrument_id (kite:NSE:NIFTY 50, demo:NIFTY 50) or by trading symbol."""
+    return get_instrument(conn, symbol) or find_by_symbol(conn, symbol)

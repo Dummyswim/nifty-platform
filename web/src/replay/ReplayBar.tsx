@@ -37,7 +37,7 @@ export function ReplayBar({ times, tf }: { times: number[]; tf: Tf }) {
       </select>
       <input type="datetime-local" value={jump} onChange={(e) => setJump(e.target.value)} aria-label="Jump to (IST)" />
       <button onClick={() => jump && set({ cursor: jumpCursor(times, tf, istToEpoch(jump)), playing: false })} disabled={!jump}>Go</button>
-      {replaying && <button className="ghost" onClick={exit}>Live</button>}
+      {replaying && <button className="ghost" onClick={exit}>Exit replay</button>}
     </div>
   );
 }

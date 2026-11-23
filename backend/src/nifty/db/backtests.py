@@ -11,7 +11,7 @@ from nifty.analytics.export import STOP_REASONS, TARGET_REASONS
 from nifty.analytics.metrics import compute_metrics
 from nifty.contracts import Bar, Instrument, TradeRecord
 from nifty.db.bars import create_snapshot, read_bars
-from nifty.db.instruments import find_by_symbol, get_instrument
+from nifty.db.instruments import find_instrument, get_instrument
 from nifty.db.runs import load_events, persist_run, run_key
 from nifty.engines.base import get_engine, load_builtin_engines
 from nifty.engines.runner import RunResult, run_batch
@@ -47,7 +47,7 @@ def resolve_input(
         ins = get_instrument(conn, row["instrument_id"])
         lo, hi = row["from_utc"], row["to_utc"]
     else:
-        ins = find_by_symbol(conn, p.get("symbol") or "")
+        ins = find_instrument(conn, p.get("symbol") or "")
         lo, hi = _range(cal, p.get("from_date"), p.get("to_date"))
     if ins is None:
         raise BacktestError("unknown symbol; import data first")

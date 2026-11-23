@@ -11,6 +11,8 @@ import { IndicatorPanel } from "../indicators/IndicatorPanel";
 import { useIndicators } from "../indicators/useIndicators";
 import { ReplayBar } from "../replay/ReplayBar";
 import { useReplay } from "../replay/store";
+import { banner } from "../live/messages";
+import { useLiveStream } from "../live/useLiveStream";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "select", label: "Select" },
@@ -23,13 +25,16 @@ const TOOLS: { id: Tool; label: string }[] = [
 export function Chart() {
   const { symbol, tf, restored, focus, set } = useUi();
   const cursor = useReplay((r) => r.cursor);
-  const ind = useIndicators(symbol);
+  const [live, setLive] = useState(false);
+  const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
+  const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
+  const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
+  const ind = useIndicators(symbol, live && iid ? { source: `live:${iid}`, version: ver } : null);
   const [times, setTimes] = useState<number[]>([]);
   const overlays = useMemo(() => [...ind.overlays, ...(focus?.extra ?? [])], [ind.overlays, focus]);
   const qc = useQueryClient();
   const [tool, setTool] = useState<Tool>("select");
 
-  const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
   const key = ["drawings", symbol];
   const drawings = useQuery({ queryKey: key, queryFn: () => api<DrawingOut[]>(`/drawings?symbol=${encodeURIComponent(symbol)}`) });
@@ -41,6 +46,9 @@ export function Chart() {
     set({ restored: true, ...(p?.symbol ? { symbol: p.symbol } : {}), ...(p?.tf && TFS.includes(p.tf) ? { tf: p.tf } : {}) });
   }, [prefs.isSuccess, prefs.data, restored, set]);
 
+  const sub = useLiveStream({ instrument: symbol, timeframe: tf, engines: ind.enabledIds, enabled: live });
+  useEffect(() => setVer(sub.version), [sub.version]);
+  const bn = banner(sub.state, sub.socket);
   const savePref = (next: { symbol: string; tf: Tf }) =>
     void api(`/prefs/chart`, { method: "PUT", body: { value: next } });
 
@@ -68,10 +76,19 @@ export function Chart() {
     <div className="chart-page">
       <div className="toolbar" role="toolbar" aria-label="Chart controls">
         <ReplayBar times={times} tf={tf} />
+        <div className="seg" role="group" aria-label="Mode">
+          <button className={!live ? "on" : ""} onClick={() => setLive(false)} data-testid="mode-history">History</button>
+          <button className={live ? "on" : ""} onClick={() => { useReplay.getState().exit(); setLive(true); }} data-testid="mode-live">Live</button>
+        </div>
         <select value={symbol} onChange={(e) => pick({ symbol: e.target.value })} aria-label="Symbol">
-          {(instruments.data ?? [{ tradingsymbol: symbol } as InstrumentOut]).map((i) => (
-            <option key={i.tradingsymbol}>{i.tradingsymbol}</option>
-          ))}
+          {(instruments.data ?? [{ tradingsymbol: symbol, instrument_id: symbol } as InstrumentOut]).map((i) => {
+            const dup = (instruments.data ?? []).filter((x) => x.tradingsymbol === i.tradingsymbol).length > 1;
+            return (
+              <option key={i.instrument_id} value={dup ? i.instrument_id : i.tradingsymbol}>
+                {dup ? i.instrument_id : i.tradingsymbol}
+              </option>
+            );
+          })}
         </select>
         <div className="seg" role="group" aria-label="Timeframe">
           {TFS.map((t) => (
@@ -88,6 +105,12 @@ export function Chart() {
           ))}
         </div>
       </div>
+      {live && (
+        <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
+          {bn.text}
+          {bn.connectKite && <button className="ghost" onClick={() => useUi.getState().set({ page: "settings" })}>Connect Kite</button>}
+        </div>
+      )}
       {ready && (
         <ChartView
           symbol={symbol}
@@ -104,6 +127,7 @@ export function Chart() {
           cursor={cursor}
           focus={focus}
           onTimes={setTimes}
+          liveBars={live ? sub.bars : null}
         />
       )}
       <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
