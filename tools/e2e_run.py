@@ -1,4 +1,4 @@
-"""`make e2e`: seed `nifty_test` with the oracle CSV, start the API and the built SPA on spare
+"""`make e2e`: seed `nifty_test` with the oracle CSV, start the API, the worker and the built SPA on spare
 ports with a temporary password, run Playwright, stop everything. Never touches the dev DB; do not
 run it at the same time as pytest (both use `nifty_test`).
 
@@ -118,6 +118,7 @@ def main() -> int:
             return 1
         start([sys.executable, "-m", "uvicorn", "nifty.api.main:create_app", "--factory",
                "--host", "127.0.0.1", "--port", str(api_port)], REPO / "backend")  # fmt: skip
+        start([sys.executable, "-m", "nifty.worker"], REPO / "backend")
         start(["npx", "vite", "preview", "--host", "127.0.0.1", "--port", str(web_port), "--strictPort"], web)
         wait(f"http://127.0.0.1:{api_port}/readyz")
         wait(origin + "/")

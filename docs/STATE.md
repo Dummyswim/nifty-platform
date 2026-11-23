@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C06
-last_update: 2026-11-23 (C05)
+next_chunk: C07
+last_update: 2026-11-23 (C06)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=none
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -13,7 +13,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C03 | done | NVS port, parity harness |
 | C04 | done | jobs, worker, backtests, analytics, export, API, bench |
 | C05 | done | UI chart core, drawings, login, e2e |
-| C06 | pending | UI indicators, replay, audit/analytics (MVP) |
+| C06 | done | UI indicators, overlays, replay, backtests/audit/analytics (MVP, tag mvp-nvs) |
 | C07 | pending | Kite REST + instrument master |
 | C08 | pending | Kite live collector + live engine runner |
 | C09 | pending | Balu 1: params, levels, golden, moving line |
@@ -56,11 +56,14 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Drawing storage: table `drawings(id drw_*, user_id, instrument_id, kind trendline|hline|rect|text, data jsonb)`; `data = {points:[{t: UTC epoch s, p: price}] (1 point for hline/text, 2 otherwise), text?, color?}`. Rendered via logical-index interpolation (`timeToLogical`), so a 1m drawing keeps its place on any TF. Prefs key `chart` = {symbol, tf}.
 - Web: `ChartView` props `{symbol, tf, tool: select|trendline|hline|rect|text, drawings: DrawingOut[], onCreate(kind,data), onUpdate(id,data), onDelete(id), onToolDone()}`; DOM hooks `data-testid=chart` with `data-bars/data-tf/data-symbol/data-drawings`, `legend`, `legend-c`. Pure maths in `chart/geometry.ts` (+ vitest), custom series primitive `chart/primitives.ts`. Chart page is lazy-loaded; Settings is a shell (Kite placeholder). lightweight-charts v5, zustand store `src/store.ts`.
 - e2e: `make e2e` = `tools/e2e_run.py` (seeds/migrates/truncates `nifty_test` with the oracle CSV, builds the SPA, starts uvicorn + `vite preview` on free ports with a temp password, runs `web/e2e/smoke.spec.ts`; `E2E_SHOT=<png>` saves a 1280x800 screenshot). Never run it concurrently with pytest (same DB). Chromium needs 4 system libs; without sudo they are extracted into gitignored `tools/.e2e-libs` (recipe in the script docstring).
+- C06 web modules: `overlay/{pick,layers,primitive}.ts` (pickOverlays by `avail <= cursor`, one `OverlayPrimitive` drawing every kind, `plotLayers/revealPlot/splitRuns`), `replay/{logic,store}.ts` + `ReplayBar` (zustand `cursor` UTC s, null = end), `indicators/{schemaForm,useIndicators,IndicatorPanel,EnginePanel}`, `backtests/{Backtests,AuditDrawer,Analytics(lazy, ECharts),Metrics,series,audit,tradeTable}`. Page state in `src/store.ts` (`page`, `symbol`, `tf`, `focus` set by the audit drawer, `backtestId`). Prefs keys: `chart` {symbol, tf}, `indicators` {engine_id: {enabled, params, ui}} (NVS enabled by default). Indicator run = `POST engines/{id}/run` on the engine's default tf with only non-default, non-ui params (stable job key), polled via `/jobs/{id}`, outputs via `plots|events|overlays?run_id=`.
+- API additions (C06): typed response models for engines (`params_schema`, `plots` specs), jobs, backtests, analytics, audit, `plots` (now `t` epoch s, `timeframe`, `panel`), `events`, `overlays`. DOM hooks on the chart: `data-shown` (bars revealed), `data-entry-markers` (revealed at cursor), `data-overlays`, `data-plots`, `data-cursor`.
 - Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C06: one `OverlayPrimitive` class with a draw branch per kind instead of eight classes. Step plots (stop/target) are drawn as one series per contiguous run (lightweight-charts connects stepped lines across gaps). Engine outputs only come from the worker (`engine_run` jobs), so `make e2e` now starts the worker too. New-run form: date range (no snapshot picker); zone/band/region renderers are untested visually (NVS emits only markers and lines). Replay play starts 200 bars before the end when begun from live. Engine panel is the latest bar only (spec). Audit "Open on chart" switches to the backtest timeframe and draws entry/stop/target/exit from the audit payload.
 - C05: added deps `lightweight-charts@5`, `@playwright/test`; chromium system libs (libnspr4, libnss3, libasound2t64) came from `apt-get download` extracted into `tools/.e2e-libs` (no sudo; avoided the ASK). Shared `api` fixture + `TABLES` moved into tests/conftest.py. `run_batch` skips the 1m aux buffer for non-1m input. No router dependency (page state in zustand). Drawing text is edited only at creation (window.prompt); no edit-in-place yet. Volume pane code exists but is untested in the browser (the oracle has `volume_kind=absent`).
 - C04: `datasets/import` takes the raw file as the request body (no multipart: python-multipart is not a listed dependency). `openpyxl` added to pyproject (chunk-listed); mypy ignores its missing stubs. Sharpe/audit/metric definitions as in Interfaces. Trades persisted for the NVS tv mode only (index points); option fields stay null until C12. `engine_run` jobs persist a run without a backtest.
 - C04 acceptance numbers: NVS on the oracle = 15 trades, net -23.74 pts vs twin -13.75: costs match (88.99 vs 88.98; 0.0125 %/side = 2.5 bps round trip) and the ~10 pts gross gap is the stop/target anchoring (signal close + mintick rounding vs fill-anchored, unrounded).

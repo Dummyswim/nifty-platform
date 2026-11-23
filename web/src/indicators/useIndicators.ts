@@ -1,0 +1,108 @@
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { api } from "../api/client";
+import type { EngineOut, EventsOut, JobOut, OverlaysOut, PlotsOut, SubmitOut } from "../api/schemas";
+import { TF_SEC } from "../replay/logic";
+import type { Tf } from "../chart/geometry";
+import { type PlotLayer, plotLayers } from "../overlay/layers";
+import { type El, toEl } from "../overlay/pick";
+import { type Field, type Schema, defaultsOf, fieldsFromSchema, paramsForRun } from "./schemaForm";
+
+export interface IndState {
+  enabled: boolean;
+  params: Record<string, unknown>;
+  ui: Record<string, unknown>;
+}
+export type IndPrefs = Record<string, IndState>;
+export const DEFAULT_ENABLED = "pine.nvs_scalper"; // success criterion: VWAP strategy overlays automatically
+
+export type RunStatus = { state: "running" } | { state: "failed"; error: string } | { state: "ready"; runId: string };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Submit `engines/{id}/run` (same key => cached run), poll the job, resolve to the run id. */
+export async function runEngine(engine: EngineOut, symbol: string, params: Record<string, unknown>): Promise<string> {
+  const sub = await api<SubmitOut>(`/engines/${engine.id}/run`, { body: { symbol, timeframe: engine.default_timeframe, params } });
+  for (let i = 0; i < 240; i++) {
+    const j = await api<JobOut>(`/jobs/${sub.job_id}`);
+    if (j.status === "done" && j.result_ref) return j.result_ref;
+    if (j.status === "failed") throw new Error(j.error ?? "engine run failed");
+    await sleep(i < 4 ? 250 : 750);
+  }
+  throw new Error("engine run timed out");
+}
+
+export function fieldsOf(engine: EngineOut): Field[] {
+  return fieldsFromSchema(engine.params_schema as Schema);
+}
+
+export function useIndicators(symbol: string) {
+  const qc = useQueryClient();
+  const engines = useQuery({ queryKey: ["engines"], queryFn: () => api<EngineOut[]>("/engines") });
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
+
+  const state = useMemo((): IndPrefs => {
+    const saved = (prefs.data?.["indicators"] ?? {}) as IndPrefs;
+    const out: IndPrefs = {};
+    for (const e of engines.data ?? []) {
+      const d = defaultsOf(fieldsOf(e));
+      const s = saved[e.id];
+      out[e.id] = {
+        enabled: s?.enabled ?? e.id === DEFAULT_ENABLED,
+        params: { ...d.params, ...(s?.params ?? {}) },
+        ui: { ...d.ui, ...(s?.ui ?? {}) },
+      };
+    }
+    return out;
+  }, [engines.data, prefs.data]);
+
+  const save = useMutation({
+    mutationFn: (next: IndPrefs) => api("/prefs/indicators", { method: "PUT", body: { value: next } }),
+    onMutate: (next) => qc.setQueryData(["prefs"], (old: Record<string, unknown> | undefined) => ({ ...(old ?? {}), indicators: next })),
+  });
+  const update = (id: string, patch: Partial<IndState>) => save.mutate({ ...state, [id]: { ...state[id]!, ...patch } });
+
+  const active = (engines.data ?? []).filter((e) => state[e.id]?.enabled);
+  const runKey = (e: EngineOut) => paramsForRun(fieldsOf(e), state[e.id]!.params);
+  const runs = useQueries({
+    queries: active.map((e) => ({
+      queryKey: ["run", e.id, symbol, JSON.stringify(runKey(e))],
+      queryFn: () => runEngine(e, symbol, runKey(e)),
+      staleTime: Infinity,
+    })),
+  });
+  const ready = active.map((e, i) => ({ e, runId: runs[i]?.data }));
+  const outs = useQueries({
+    queries: ready.flatMap(({ runId }) =>
+      (["plots", "events", "overlays"] as const).map((k) => ({
+        queryKey: [k, runId],
+        queryFn: () => api<PlotsOut | EventsOut | OverlaysOut>(`/${k}?run_id=${runId}`),
+        enabled: !!runId,
+        staleTime: Infinity,
+      })),
+    ),
+  });
+
+  const status: Record<string, RunStatus> = {};
+  const layers: PlotLayer[] = [];
+  const overlays: El[] = [];
+  const panels: { engine: EngineOut; panel: PlotsOut["panel"]; times: number[] }[] = [];
+  active.forEach((e, i) => {
+    const r = runs[i]!;
+    status[e.id] = r.isError ? { state: "failed", error: (r.error as Error).message } : r.data ? { state: "ready", runId: r.data } : { state: "running" };
+    const plots = outs[i * 3]?.data as PlotsOut | undefined;
+    const ov = outs[i * 3 + 2]?.data as OverlaysOut | undefined;
+    if (plots) {
+      layers.push(...plotLayers(e, plots, TF_SEC[e.default_timeframe as Tf] ?? 300, state[e.id]!.ui));
+      panels.push({ engine: e, panel: plots.panel, times: plots.t });
+    }
+    if (ov) overlays.push(...ov.overlays.map(toEl));
+  });
+  const colors = useMemo(() => {
+    const c: Record<string, string> = {};
+    for (const e of active) for (const [k, v] of Object.entries(state[e.id]!.ui)) if (k.startsWith("color_") && typeof v === "string") c[k.slice(6)] = v;
+    return c;
+  }, [active, state]);
+
+  return { engines: engines.data ?? [], state, update, status, layers, overlays, panels, colors };
+}

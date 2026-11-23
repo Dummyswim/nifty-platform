@@ -5,7 +5,12 @@ import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api
 import { ChartView, type Tool } from "../chart/ChartView";
 import { TFS, TF_LABEL, type Tf } from "../chart/geometry";
 import { useUi } from "../store";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { EnginePanel } from "../indicators/EnginePanel";
+import { IndicatorPanel } from "../indicators/IndicatorPanel";
+import { useIndicators } from "../indicators/useIndicators";
+import { ReplayBar } from "../replay/ReplayBar";
+import { useReplay } from "../replay/store";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "select", label: "Select" },
@@ -16,7 +21,11 @@ const TOOLS: { id: Tool; label: string }[] = [
 ];
 
 export function Chart() {
-  const { symbol, tf, restored, set } = useUi();
+  const { symbol, tf, restored, focus, set } = useUi();
+  const cursor = useReplay((r) => r.cursor);
+  const ind = useIndicators(symbol);
+  const [times, setTimes] = useState<number[]>([]);
+  const overlays = useMemo(() => [...ind.overlays, ...(focus?.extra ?? [])], [ind.overlays, focus]);
   const qc = useQueryClient();
   const [tool, setTool] = useState<Tool>("select");
 
@@ -58,6 +67,7 @@ export function Chart() {
   return (
     <div className="chart-page">
       <div className="toolbar" role="toolbar" aria-label="Chart controls">
+        <ReplayBar times={times} tf={tf} />
         <select value={symbol} onChange={(e) => pick({ symbol: e.target.value })} aria-label="Symbol">
           {(instruments.data ?? [{ tradingsymbol: symbol } as InstrumentOut]).map((i) => (
             <option key={i.tradingsymbol}>{i.tradingsymbol}</option>
@@ -88,8 +98,18 @@ export function Chart() {
           onUpdate={(id, data) => update.mutate({ id, data })}
           onDelete={(id) => remove.mutate(id)}
           onToolDone={() => setTool("select")}
+          plots={ind.layers}
+          overlays={overlays}
+          overlayColors={ind.colors}
+          cursor={cursor}
+          focus={focus}
+          onTimes={setTimes}
         />
       )}
+      <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
+      <div className="cards">
+        {ind.panels.map((p) => <EnginePanel key={p.engine.id} id={p.engine.id} panel={p.panel} atEnd={cursor === null} />)}
+      </div>
     </div>
   );
 }

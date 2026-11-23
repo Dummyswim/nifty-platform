@@ -422,6 +422,34 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AuditOut */
+        AuditOut: {
+            trade: components["schemas"]["TradeRecord"];
+            /** Levels */
+            levels: {
+                [key: string]: number | null;
+            };
+            /** Strike */
+            strike?: number | null;
+            /** Option Type */
+            option_type?: string | null;
+            /** Pnl Pts */
+            pnl_pts: number;
+            /** Pnl Inr */
+            pnl_inr?: number | null;
+            /** Roi Pct */
+            roi_pct?: number | null;
+            /** Stop Hit */
+            stop_hit: boolean;
+            /** Target Hit */
+            target_hit: boolean;
+            /** Exit Reason */
+            exit_reason: string;
+            /** Window Bars */
+            window_bars: components["schemas"]["WindowBar"][];
+            /** Events */
+            events: components["schemas"]["EngineEvent"][];
+        };
         /** BacktestIn */
         BacktestIn: {
             /** Symbol */
@@ -456,6 +484,61 @@ export interface components {
              * @default 0
              */
             cost_pts: number;
+        };
+        /** BacktestOut */
+        BacktestOut: {
+            /** Backtest Id */
+            backtest_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Engine Id */
+            engine_id: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Timeframe */
+            timeframe: string;
+            /** Mode */
+            mode: string;
+            /** Qty */
+            qty: number;
+            /** Cost Pts */
+            cost_pts: number;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            summary: components["schemas"]["MetricsOut"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** BacktestRow */
+        BacktestRow: {
+            /** Backtest Id */
+            backtest_id: string;
+            /** Engine Id */
+            engine_id: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Timeframe */
+            timeframe: string;
+            /** Mode */
+            mode: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** N Trades */
+            n_trades?: number | null;
+            /** Total Pnl Pts */
+            total_pnl_pts?: number | null;
         };
         /**
          * BarsOut
@@ -515,6 +598,97 @@ export interface components {
             kind: "trendline" | "hline" | "rect" | "text";
             data: components["schemas"]["DrawingData"];
         };
+        /** EngineEvent */
+        EngineEvent: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Seq
+             * @default 0
+             */
+            seq: number;
+            /** Event Type */
+            event_type: string;
+            /** Engine Id */
+            engine_id: string;
+            /** Engine Version */
+            engine_version: string;
+            /** Config Hash */
+            config_hash: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /** Source Id */
+            source_id: string;
+            /** Timeframe */
+            timeframe: string;
+            /**
+             * Event Time Utc
+             * Format: date-time
+             */
+            event_time_utc: string;
+            /**
+             * Available At Utc
+             * Format: date-time
+             */
+            available_at_utc: string;
+            /**
+             * Bar Start Utc
+             * Format: date-time
+             */
+            bar_start_utc: string;
+            /**
+             * Bar End Utc
+             * Format: date-time
+             */
+            bar_end_utc: string;
+            /**
+             * Confirmed Or Provisional
+             * @default confirmed
+             * @enum {string}
+             */
+            confirmed_or_provisional: "confirmed" | "provisional";
+            /** Price Basis */
+            price_basis?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /** EngineOut */
+        EngineOut: {
+            /** Id */
+            id: string;
+            /** Version */
+            version: string;
+            /** Default Timeframe */
+            default_timeframe: string;
+            /** Ready */
+            ready: boolean;
+            /**
+             * Params Schema
+             * @description JSON Schema of Params; `ui` fields tagged x-ui
+             */
+            params_schema: {
+                [key: string]: unknown;
+            };
+            /** Plots */
+            plots?: components["schemas"]["PlotSpec"][];
+        };
+        /** EventsOut */
+        EventsOut: {
+            /** Run Id */
+            run_id: string;
+            /** Events */
+            events: components["schemas"]["EngineEvent"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -533,6 +707,23 @@ export interface components {
             /** Lot Size */
             lot_size?: number | null;
         };
+        /** JobOut */
+        JobOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error?: string | null;
+            /** Result Ref */
+            result_ref?: string | null;
+            /** Backtest Id */
+            backtest_id?: string | null;
+        };
         /** LoginBody */
         LoginBody: {
             /** Password */
@@ -542,6 +733,141 @@ export interface components {
         Me: {
             /** User Id */
             user_id: number;
+        };
+        /** MetricsOut */
+        MetricsOut: {
+            /** N Trades */
+            n_trades: number;
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            /** Win Rate */
+            win_rate: number | null;
+            /** Gross Profit Pts */
+            gross_profit_pts: number;
+            /** Gross Loss Pts */
+            gross_loss_pts: number;
+            /** Profit Factor */
+            profit_factor: number | null;
+            /** Total Pnl Pts */
+            total_pnl_pts: number;
+            /** Expectancy Pts */
+            expectancy_pts: number | null;
+            /** Max Drawdown Pts */
+            max_drawdown_pts: number;
+            /** Max Consecutive Wins */
+            max_consecutive_wins: number;
+            /** Max Consecutive Losses */
+            max_consecutive_losses: number;
+            /** Sharpe */
+            sharpe: number | null;
+            /** N Sessions */
+            n_sessions: number;
+            /** Low N */
+            low_n: boolean;
+            /** Flags */
+            flags: string[];
+        };
+        /**
+         * OverlayElement
+         * @description Renderer-agnostic, event-sourced. The runner stamps engine_id and avail_at_utc.
+         */
+        OverlayElement: {
+            /** Id */
+            id: string;
+            /**
+             * Ver
+             * @default 0
+             */
+            ver: number;
+            /**
+             * Deleted
+             * @default false
+             */
+            deleted: boolean;
+            /** Avail At Utc */
+            avail_at_utc?: string | null;
+            /**
+             * Engine Id
+             * @default
+             */
+            engine_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "line" | "step_line" | "hline" | "band" | "zone" | "marker" | "label" | "region";
+            /**
+             * T0
+             * Format: date-time
+             */
+            t0: string;
+            /** T1 */
+            t1?: string | null;
+            /** P0 */
+            p0?: number | null;
+            /** P1 */
+            p1?: number | null;
+            /** Style */
+            style?: {
+                [key: string]: unknown;
+            };
+            /** Text */
+            text?: string | null;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
+        };
+        /** OverlaysOut */
+        OverlaysOut: {
+            /** Run Id */
+            run_id: string;
+            /** Overlays */
+            overlays: components["schemas"]["OverlayElement"][];
+        };
+        /** PlotSpec */
+        PlotSpec: {
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @default line
+             * @enum {string}
+             */
+            kind: "line" | "step" | "hist" | "area";
+            /**
+             * Role
+             * @default neutral
+             */
+            role: string;
+            /**
+             * Pane
+             * @default own
+             * @enum {string}
+             */
+            pane: "overlay" | "own";
+        };
+        /** PlotsOut */
+        PlotsOut: {
+            /** Run Id */
+            run_id: string;
+            /** Timeframe */
+            timeframe: string;
+            /**
+             * T
+             * @description engine bar start, UTC epoch seconds
+             */
+            t: number[];
+            /** Series */
+            series: {
+                [key: string]: (number | null)[];
+            };
+            /** Panel */
+            panel?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** Point */
         Point: {
@@ -572,6 +898,103 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** SubmitOut */
+        SubmitOut: {
+            /** Job Id */
+            job_id: number;
+            /** Created */
+            created: boolean;
+            /** Status */
+            status?: string | null;
+            /** Result Ref */
+            result_ref?: string | null;
+        };
+        /** TradeRecord */
+        TradeRecord: {
+            /** Trade Id */
+            trade_id: string;
+            /** Engine Id */
+            engine_id: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "long" | "short";
+            /** Signal Bar Start */
+            signal_bar_start?: string | null;
+            /**
+             * Entry Time
+             * Format: date-time
+             */
+            entry_time: string;
+            /** Entry Px */
+            entry_px: number;
+            /**
+             * Exit Time
+             * Format: date-time
+             */
+            exit_time: string;
+            /** Exit Px */
+            exit_px: number;
+            /** Exit Reason */
+            exit_reason: string;
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
+            /** Gross Pts */
+            gross_pts: number;
+            /**
+             * Cost Pts
+             * @default 0
+             */
+            cost_pts: number;
+            /** Net Pts */
+            net_pts: number;
+            /** R Multiple */
+            r_multiple?: number | null;
+            /**
+             * Mae Pts
+             * @default 0
+             */
+            mae_pts: number;
+            /**
+             * Mfe Pts
+             * @default 0
+             */
+            mfe_pts: number;
+            /**
+             * Bars Held
+             * @default 1
+             */
+            bars_held: number;
+            /**
+             * Execution Mode
+             * @default tv
+             * @enum {string}
+             */
+            execution_mode: "tv" | "conservative";
+            /** Flags */
+            flags?: string[];
+            /** Contract Id */
+            contract_id?: string | null;
+            /** Entry Prem */
+            entry_prem?: number | null;
+            /** Exit Prem */
+            exit_prem?: number | null;
+            /** Pnl Inr */
+            pnl_inr?: number | null;
+            /** Roi Pct */
+            roi_pct?: number | null;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -584,6 +1007,24 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WindowBar */
+        WindowBar: {
+            /**
+             * T
+             * Format: date-time
+             */
+            t: string;
+            /** O */
+            o: number;
+            /** H */
+            h: number;
+            /** L */
+            l: number;
+            /** C */
+            c: number;
+            /** V */
+            v: number;
         };
     };
     responses: never;
@@ -728,9 +1169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["EngineOut"][];
                 };
             };
         };
@@ -756,9 +1195,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SubmitOut"];
                 };
             };
             /** @description Validation Error */
@@ -789,9 +1226,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
             /** @description Validation Error */
@@ -822,9 +1257,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["BacktestRow"][];
                 };
             };
             /** @description Validation Error */
@@ -857,9 +1290,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SubmitOut"];
                 };
             };
             /** @description Validation Error */
@@ -890,9 +1321,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BacktestOut"];
                 };
             };
             /** @description Validation Error */
@@ -923,9 +1352,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["TradeRecord"][];
                 };
             };
             /** @description Validation Error */
@@ -956,9 +1383,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetricsOut"];
                 };
             };
             /** @description Validation Error */
@@ -992,9 +1417,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AuditOut"];
                 };
             };
             /** @description Validation Error */
@@ -1062,9 +1485,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlotsOut"];
                 };
             };
             /** @description Validation Error */
@@ -1100,9 +1521,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["EventsOut"];
                 };
             };
             /** @description Validation Error */
@@ -1138,9 +1557,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OverlaysOut"];
                 };
             };
             /** @description Validation Error */

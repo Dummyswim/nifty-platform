@@ -86,6 +86,7 @@ def list_engines(include_unready: bool = False) -> list[dict[str, Any]]:
             "version": s.cls.version,
             "default_timeframe": s.cls.default_timeframe,
             "schema": params_json_schema(s.cls.Params),
+            "plots": [pl.model_dump() for pl in s.cls.plots],
             "ready": s.ready,
         }
         for s in sorted(_REGISTRY.values(), key=lambda s: s.cls.id)

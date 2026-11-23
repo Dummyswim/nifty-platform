@@ -22,6 +22,12 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect(chart).toHaveAttribute("data-symbol", "NIFTY 50");
   await expect(chart).toHaveAttribute("data-tf", "1m"); // default landing view
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(1000);
+  // NVS is on by default: its 15 entry markers draw even on the 1m chart (outputs are time-anchored)
+  await expect(page.getByTestId("status-pine.nvs_scalper")).toHaveText("ready", { timeout: 45_000 });
+  await expect(chart).toHaveAttribute("data-entry-markers", "15");
+  await expect(page.getByTestId("engine-panel")).toContainText("VWAP");
+  const nOverlays = Number(await chart.getAttribute("data-overlays"));
+  expect(nOverlays).toBeGreaterThan(15);
   await expect(page.getByTestId("legend-c")).toHaveText(/^\d+\.\d\d$/);
   const bars1m = Number(await chart.getAttribute("data-bars"));
 
@@ -49,6 +55,40 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.mouse.click(at.x, at.y);
   await page.keyboard.press("Delete");
   await expect(chart).toHaveAttribute("data-drawings", "0");
+
+  // replay: jump into the data, entry markers are revealed only up to the cursor
+  await page.getByLabel("Jump to (IST)").fill("2026-10-27T12:30");
+  await page.getByRole("button", { name: "Go" }).click();
+  await expect(page.getByTestId("replay-badge")).toBeVisible();
+  const shown = Number(await chart.getAttribute("data-shown"));
+  expect(shown).toBeGreaterThan(0);
+  expect(shown).toBeLessThan(Number(await chart.getAttribute("data-bars")));
+  await expect(chart).toHaveAttribute("data-entry-markers", "1"); // only the 10-23 entry is known yet
+  await page.getByRole("button", { name: "Step forward" }).click();
+  await expect(chart).toHaveAttribute("data-shown", String(shown + 1)); // one bar at a time
+  await expect(chart).toHaveAttribute("data-entry-markers", "1");
+  await page.getByRole("button", { name: "Live" }).click();
+  await expect(chart).toHaveAttribute("data-entry-markers", "15");
+  await expect(page.getByTestId("replay-badge")).toHaveCount(0);
+
+  // backtest -> trades -> audit -> open on chart
+  await page.getByRole("button", { name: "Backtests", exact: true }).click();
+  await page.getByTestId("run-backtest").click();
+  await expect(page.getByTestId("trade-row")).toHaveCount(15, { timeout: 45_000 });
+  await expect(page.getByTestId("metrics")).toContainText("LOW N");
+  await page.getByTestId("trade-row").first().click();
+  await expect(page.getByTestId("audit")).toContainText("Exit reason");
+  await page.getByTestId("open-chart").click();
+  await expect(chart).toHaveAttribute("data-tf", "5m");
+  await expect(chart).toHaveAttribute("data-cursor", "");
+  await expect.poll(async () => Number(await chart.getAttribute("data-overlays"))).toBeGreaterThan(nOverlays); // audit lines
+  await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(100);
+  if (SHOT) await page.screenshot({ path: SHOT.replace(/\.png$/, "-audit.png") });
+
+  // analytics page renders its charts
+  await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  await expect(page.getByTestId("equity")).toBeVisible();
+  await expect(page.getByTestId("session-hist").locator("canvas")).toHaveCount(1);
 
   expect(problems).toEqual([]);
 });

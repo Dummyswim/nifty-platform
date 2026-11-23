@@ -29,3 +29,31 @@ nav { display: flex; gap: 6px; flex: 1; }
 .card h1 { margin: 0; font-size: 22px; } .card p { margin: 0; } .card label { display: grid; gap: 6px; color: var(--muted); }
 .card button { background: var(--accent); border-color: var(--accent); color: #fff; padding: 9px; }
 .logo { font-size: 28px; color: var(--accent); } .error { color: #ff8a8a; }
+.chart-page { position: relative; }
+.replay { display: flex; gap: 4px; align-items: center; }
+.badge { background: #f5a623; color: #000; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 12px; letter-spacing: .06em; }
+.indicators { position: absolute; top: 96px; right: 72px; z-index: 6; width: 250px; max-height: 60%; overflow: auto; background: #121724ee; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.indicators h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.ind .row { display: flex; align-items: center; gap: 8px; } .ind .name { flex: 1; font-size: 12px; }
+.chip { margin: 4px 0; font-size: 12px; padding: 2px 6px; border-radius: 4px; background: #1a2133; } .chip.failed { color: #ff8a8a; } .chip.ready { color: #6fd0b8; }
+.form { display: grid; gap: 4px; margin-top: 6px; } .form .f { display: grid; grid-template-columns: 1fr 90px; gap: 6px; align-items: center; font-size: 12px; }
+.form input[type=text], .form input[type=number], .form select { width: 100%; padding: 3px 5px; } .form .bad { border-color: #ff6b6b; }
+.form.wide { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); grid-column: 1 / -1; }
+.cards { position: absolute; left: 12px; bottom: 36px; z-index: 5; display: flex; gap: 8px; }
+.panelcard { background: #121724e6; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 210px; font-size: 12px; }
+.panelcard h4 { margin: 0 0 4px; } .prow { display: flex; justify-content: space-between; gap: 12px; } .prow.buy b, .prow.bull b { color: #26a69a; } .prow.sell b, .prow.bear b { color: #ef5350; }
+.small { font-size: 12px; } .warn { color: #f5a623; } .error { color: #ff8a8a; } .row { display: flex; align-items: center; } .gap { gap: 8px; margin: 8px 0; } .spacer { flex: 1; }
+.page { padding: 12px 20px; overflow: auto; flex: 1; }
+.newrun { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.newrun label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); } .newrun input[type=number] { width: 90px; }
+.split { display: grid; grid-template-columns: 280px 1fr; gap: 16px; margin-top: 12px; align-items: start; }
+.btlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; } .btlist button { width: 100%; text-align: left; font-size: 12px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 8px 0; }
+.metric { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 2px; } .metric b { font-size: 18px; }
+table.trades { width: 100%; border-collapse: collapse; font-size: 12px; } .trades th, .trades td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+.trades th { cursor: pointer; color: var(--muted); user-select: none; } .trades td:first-child, .trades th:first-child { text-align: left; }
+.trades tbody tr { cursor: pointer; } .trades tbody tr:hover { background: #1a2133; } .trades tr.win td:nth-child(7) { color: #26a69a; } .trades tr.loss td:nth-child(7) { color: #ef5350; }
+a.btn { background: #1a2133; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; color: var(--text); text-decoration: none; }
+.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 380px; z-index: 20; background: var(--panel); border-left: 1px solid var(--line); padding: 16px; overflow: auto; box-shadow: -10px 0 40px #0008; }
+.drawer header { display: flex; justify-content: space-between; align-items: center; } .drawer dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; } .drawer dt { color: var(--muted); } .drawer dd { margin: 0; }
+.echart { height: 240px; width: 100%; background: var(--panel); border-radius: 10px; }

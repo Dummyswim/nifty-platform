@@ -11,6 +11,7 @@ from sqlalchemy import Connection, text
 
 from nifty.analytics.export import to_csv, to_json, to_xlsx
 from nifty.api.auth import check_origin, require_user
+from nifty.contracts import EngineEvent, OverlayElement, PlotSpec, TradeRecord
 from nifty.db import backtests as bt
 from nifty.db.instruments import upsert_instrument
 from nifty.db.jobs import get_job, submit_job
@@ -20,6 +21,124 @@ from nifty.engines.base import EngineNotFound, EngineNotReady, list_engines
 from nifty.engines.base import get_engine as get_engine_spec
 
 router = APIRouter(dependencies=[Depends(require_user)])
+
+
+class EngineOut(BaseModel):
+    id: str
+    version: str
+    default_timeframe: str
+    ready: bool
+    params_schema: dict[str, Any] = Field(
+        description="JSON Schema of Params; `ui` fields tagged x-ui"
+    )
+    plots: list[PlotSpec] = Field(default_factory=list)
+
+
+class SubmitOut(BaseModel):
+    job_id: int
+    created: bool
+    status: str | None = None
+    result_ref: str | None = None
+
+
+class JobOut(BaseModel):
+    id: int
+    kind: str
+    status: str
+    attempts: int
+    error: str | None = None
+    result_ref: str | None = None
+    backtest_id: str | None = None
+
+
+class MetricsOut(BaseModel):
+    n_trades: int
+    wins: int
+    losses: int
+    win_rate: float | None
+    gross_profit_pts: float
+    gross_loss_pts: float
+    profit_factor: float | None
+    total_pnl_pts: float
+    expectancy_pts: float | None
+    max_drawdown_pts: float
+    max_consecutive_wins: int
+    max_consecutive_losses: int
+    sharpe: float | None
+    n_sessions: int
+    low_n: bool
+    flags: list[str]
+
+
+class BacktestOut(BaseModel):
+    backtest_id: str
+    run_id: str
+    engine_id: str
+    instrument_id: str
+    snapshot_id: str
+    timeframe: str
+    mode: str
+    qty: float
+    cost_pts: float
+    params: dict[str, Any]
+    summary: MetricsOut
+    created_at: datetime
+
+
+class BacktestRow(BaseModel):
+    backtest_id: str
+    engine_id: str
+    instrument_id: str
+    snapshot_id: str
+    timeframe: str
+    mode: str
+    created_at: datetime
+    n_trades: int | None = None
+    total_pnl_pts: float | None = None
+
+
+class WindowBar(BaseModel):
+    t: datetime
+    o: float
+    h: float
+    l: float  # noqa: E741
+    c: float
+    v: float
+
+
+class AuditOut(BaseModel):
+    trade: TradeRecord
+    levels: dict[str, float | None]
+    strike: float | None = None
+    option_type: str | None = None
+    pnl_pts: float
+    pnl_inr: float | None = None
+    roi_pct: float | None = None
+    stop_hit: bool
+    target_hit: bool
+    exit_reason: str
+    window_bars: list[WindowBar]
+    events: list[EngineEvent]
+
+
+class PlotsOut(BaseModel):
+    run_id: str
+    timeframe: str
+    t: list[int] = Field(description="engine bar start, UTC epoch seconds")
+    series: dict[str, list[float | None]]
+    panel: dict[str, Any] | None = None
+
+
+class EventsOut(BaseModel):
+    run_id: str
+    events: list[EngineEvent]
+
+
+class OverlaysOut(BaseModel):
+    run_id: str
+    overlays: list[OverlayElement]
+
+
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -58,12 +177,24 @@ def _job_out(conn: Connection, job_id: int, created: bool) -> dict[str, Any]:
     }
 
 
-@router.get("/engines")
+@router.get("/engines", response_model=list[EngineOut])
 def engines() -> list[dict[str, Any]]:
-    return list_engines()
+    return [
+        {
+            **{k: e[k] for k in ("id", "version", "default_timeframe", "ready")},
+            "params_schema": e["schema"],
+            "plots": e["plots"],
+        }
+        for e in list_engines()
+    ]
 
 
-@router.post("/engines/{engine_id}/run", status_code=202, dependencies=[Depends(check_origin)])
+@router.post(
+    "/engines/{engine_id}/run",
+    status_code=202,
+    response_model=SubmitOut,
+    dependencies=[Depends(check_origin)],
+)
 def engine_run(engine_id: str, body: RunIn) -> dict[str, Any]:
     _need_input(body)
     try:
@@ -76,7 +207,7 @@ def engine_run(engine_id: str, body: RunIn) -> dict[str, Any]:
         return _job_out(c, jid, created)
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", response_model=JobOut)
 def job(job_id: int) -> dict[str, Any]:
     with get_engine().connect() as c:
         j = get_job(c, job_id)
@@ -88,7 +219,9 @@ def job(job_id: int) -> dict[str, Any]:
     return j
 
 
-@router.post("/backtests", status_code=202, dependencies=[Depends(check_origin)])
+@router.post(
+    "/backtests", status_code=202, response_model=SubmitOut, dependencies=[Depends(check_origin)]
+)
 def create_backtest(body: BacktestIn) -> dict[str, Any]:
     _need_input(body)
     try:
@@ -100,7 +233,7 @@ def create_backtest(body: BacktestIn) -> dict[str, Any]:
         return _job_out(c, jid, created)
 
 
-@router.get("/backtests")
+@router.get("/backtests", response_model=list[BacktestRow])
 def backtests(limit: int = Query(50, ge=1, le=200)) -> list[dict[str, Any]]:
     with get_engine().connect() as c:
         return bt.list_backtests(c, limit)
@@ -113,26 +246,26 @@ def _backtest(c: Connection, bt_id: str) -> dict[str, Any]:
     return row
 
 
-@router.get("/backtests/{bt_id}")
+@router.get("/backtests/{bt_id}", response_model=BacktestOut)
 def backtest(bt_id: str) -> dict[str, Any]:
     with get_engine().connect() as c:
         return _backtest(c, bt_id)
 
 
-@router.get("/backtests/{bt_id}/trades")
+@router.get("/backtests/{bt_id}/trades", response_model=list[TradeRecord])
 def backtest_trades(bt_id: str) -> list[dict[str, Any]]:
     with get_engine().connect() as c:
         _backtest(c, bt_id)
         return [t.model_dump(mode="json") for t in bt.load_trades(c, bt_id)]
 
 
-@router.get("/backtests/{bt_id}/analytics")
+@router.get("/backtests/{bt_id}/analytics", response_model=MetricsOut)
 def backtest_analytics(bt_id: str) -> dict[str, Any]:
     with get_engine().connect() as c:
         return dict(_backtest(c, bt_id)["summary"])
 
 
-@router.get("/backtests/{bt_id}/audit/{trade_id}")
+@router.get("/backtests/{bt_id}/audit/{trade_id}", response_model=AuditOut)
 def backtest_audit(
     bt_id: str, trade_id: str, window: int = Query(10, ge=0, le=100)
 ) -> dict[str, Any]:
@@ -184,7 +317,7 @@ def _find_run(
     return str(row[0])
 
 
-@router.get("/plots")
+@router.get("/plots", response_model=PlotsOut)
 def plots(
     run_id: str | None = None, engine_id: str | None = None, snapshot_id: str | None = None,
     timeframe: str | None = None, config_hash: str | None = None,
@@ -192,15 +325,20 @@ def plots(
     with get_engine().connect() as c:
         rid = _find_run(c, run_id, engine_id, snapshot_id, timeframe, config_hash)
         rows = load_plots(c, rid)
+        meta = c.execute(
+            text("SELECT timeframe, panel FROM engine_runs WHERE run_id = :r"), {"r": rid}
+        ).one()
     names = sorted({k for _, v in rows for k in v})
     return {
         "run_id": rid,
-        "t": [t.isoformat() for t, _ in rows],
+        "timeframe": meta[0],
+        "panel": meta[1],
+        "t": [int(t.timestamp()) for t, _ in rows],
         "series": {n: [v.get(n) for _, v in rows] for n in names},
     }
 
 
-@router.get("/events")
+@router.get("/events", response_model=EventsOut)
 def events(
     run_id: str | None = None, engine_id: str | None = None, snapshot_id: str | None = None,
     timeframe: str | None = None, config_hash: str | None = None,
@@ -212,7 +350,7 @@ def events(
     return {"run_id": rid, "events": [e.model_dump(mode="json") for e in ev]}
 
 
-@router.get("/overlays")
+@router.get("/overlays", response_model=OverlaysOut)
 def overlays(
     run_id: str | None = None, engine_id: str | None = None, snapshot_id: str | None = None,
     timeframe: str | None = None, config_hash: str | None = None,
