@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C14
-last_update: 2026-11-24 (C13)
+next_chunk: C15
+last_update: 2026-11-24 (C14)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (live verified 2026-11-23: login, profile, master, 1m candles)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -21,6 +21,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C11 | done | Balu 3: path history, 13-row panel, alerts, snapshot/restore; `pine.balu_zone` ready=True |
 | C12 | done | options chain/Greeks/recording window/paper mapping + Options page |
 | C13 | done | research engine `research.distance_entry_v1`: features, 3 baselines, armed resumption, outcomes |
+| C14 | done | research runs, statistics, verdict, Research page |
 | C14 | pending | research runs, statistics, verdict, UI |
 | C15 | pending | hardening, lockfiles, handoff |
 
@@ -86,6 +87,8 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
+- Research runs (C14): `nifty.analytics.research` (pure: `split_sessions` 50/25/25 by session, `purge`, `bootstrap_ci` session-clustered percentile 95 % / 2,000 resamples / fixed seed, `leave_one_out`, `evaluate`, `verdict`, `run_verdict`, `THRESHOLDS` stored with every run). `nifty.db.research.run_research(conn, payload)->research_id` (`rr_`+hash of snapshot, variants, experiments, cost, seed, thresholds, code version; same inputs => same run, labels idempotent on `(engine_id, config_hash, instrument_id, signal_bar_start, side)`); own transactions per cell so checkpoints/failures outlive a rolled-back job. Tables `research_runs` (progress=finished cells, result, status running|done|failed, error), `research_labels` (alembic 0008). Job `research_run {snapshot_id|symbol, from_date, to_date, variants, experiments (target_pts list, default 10,20), cost_pts, seed}`. API `POST /research/runs` (202 job), `GET /research/runs`, `GET /research/runs/{id}` (splits, thresholds, result.cells[variant,experiment,run_id,stats.splits.{dev,val,eval},verdict.conditions], result.verdict), `GET /research/runs/{id}/labels?variant&experiment&offset&limit`. Verdict: `candidate` needs eval CI lower > 0 AND validation expectancy > 0 AND every leave-one-session-out eval expectancy > 0 AND >= 60 sessions; < 60 sessions => `inconclusive` ("insufficient sessions"); else `edge_not_established`. A run is `candidate` if any cell is (multiple comparisons noted); a candidate is not proof. Seed default 1 (user-editable, part of the run id). UI: `web/src/research/` (form, CI chart, outcome table, verdict banner with conditions, label drilldown, diagnostics, "Open on chart" via `focus.extra` markers/lines).
+
 ## Deviations (spec → actual, why)
 - C13: armed-setup choices are the user's ("pullback break"); logged extras: the arming bar is never evaluated for the trigger; a `risk_budget` skip consumes one of the 2 armings; pullback bars are defined by close vs the previous close (not colour); gap/anchor rates need k same-session bars (also for the EMA gap rate, so nothing bridges a session); baselines emit no watch/armed events; `research.invalidated` reasons `window`/`session` cancel a pending entry. Engine ruff E501 ignored under `src/nifty/engines/research/**`.
 - C12: strike-type offsets are ours (5/2/0/2/5 steps, editable); `options.r` has no default. Greeks use the last traded price (not mid) to back out IV. Option OI is derived from recorded ticks (no new table). Option contracts are hidden from the chart's instrument list (they open from the Options page). Test fixture cleanup now also truncates `prefs`. UNVERIFIED live: the dynamic subscription/window recording against Kite (only the fake-server test covers it).
@@ -115,6 +118,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - `APP_PASSWORD_HASH` is printed single-quoted (`'scrypt$...'`): compose/dotenv would interpolate `$`. Verified pydantic-settings strips the quotes.
 - web: `typescript@5` (not 7): openapi-typescript 7.13 needs the TS 5 compiler API. Single `web/tsconfig.json` so `tsc --noEmit -p` really checks src.
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
+- C14: checkpoint is per (variant, experiment) cell, not per session (one stateful engine pass cannot be split across sessions without breaking D14 state continuity). Purge drops a trade of an earlier split if max(exit, entry + max_hold) reaches the next split's first bar. EMA9/21 + anchor lines in the drilldown come from enabling the research engine in the chart's indicator panel (the focus overlay adds entry/stop/target lines and event markers). Oracle (17 sessions) => `inconclusive` as required.
 
 ## Open issues / ASKs
 - `anchor_cross_ema_order` is OUR interpretation (prompt does not define the crossover): prev close <= prev V and close > V (mirrored) with F > S (F < S). Check it before reading any result. Oracle counts (5,996 bars, stop 12, hold 10): 97/94 (anchor cross), 437/401 (gap re-expansion), 267/251 (aligned), 29/29 (armed) trades for target 10/20; counts only.

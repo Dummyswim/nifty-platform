@@ -46,4 +46,5 @@ ignore_missing_imports = true  # no types-PyYAML: not a chunk dependency
 "src/nifty/db/**" = ["E501"]  # raw SQL
 "src/nifty/engines/balu/**" = ["E501"]  # Pine-port tables and rows read better unwrapped
 "src/nifty/engines/research/**" = ["E501"]  # payload dicts read better unwrapped
+"src/nifty/analytics/research.py" = ["E501"]  # threshold tables
 "tests/**" = ["E501"]

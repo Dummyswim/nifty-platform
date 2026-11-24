@@ -67,3 +67,6 @@ table.chain { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8
 .contract { margin-top: 12px; } .contract-chart { position: relative; height: 340px; } .contract-chart .chart-wrap { position: absolute; inset: 0; }
 .oi-chart { height: 140px; margin-top: 6px; } .greeks { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; align-items: baseline; }
 .chk { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 6px; }
+.rs-banner { padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid var(--line); }
+.rs-banner.candidate { color: #6fd0b8; border-color: #1f6f5e; } .rs-banner.inconclusive { color: #f5a623; border-color: #7a5a1a; } .rs-banner.edge_not_established { color: #ff8a8a; border-color: #8a2f2f; }
+.conds { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; } .conds .ok { color: #6fd0b8; } .conds .bad { color: #ff8a8a; }

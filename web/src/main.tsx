@@ -9,6 +9,7 @@ import "./styles.css";
 
 const Chart = lazy(() => import("./pages/Chart").then((m) => ({ default: m.Chart })));
 const Backtests = lazy(() => import("./backtests/Backtests").then((m) => ({ default: m.Backtests })));
+const Research = lazy(() => import("./research/Research"));
 const Options = lazy(() => import("./options/Options"));
 const Analytics = lazy(() => import("./backtests/Analytics"));
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
@@ -30,6 +31,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <nav>
           {tab("chart", "Chart")}
           {tab("backtests", "Backtests")}
+          {tab("research", "Research")}
           {tab("analytics", "Analytics")}
           {tab("options", "Options")}
           {tab("settings", "Settings")}
@@ -39,7 +41,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </button>
       </header>
       <Suspense fallback={<p className="muted pad">Loading chart…</p>}>
-        {page === "chart" ? <Chart /> : page === "backtests" ? <Backtests /> : page === "analytics" ? <Analytics /> : page === "options" ? <Options /> : <Settings />}
+        {page === "chart" ? <Chart /> : page === "backtests" ? <Backtests /> : page === "research" ? <Research /> : page === "analytics" ? <Analytics /> : page === "options" ? <Options /> : <Settings />}
       </Suspense>
     </div>
   );

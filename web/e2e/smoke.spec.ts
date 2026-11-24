@@ -126,6 +126,20 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByLabel("Expiry kind").selectOption("current weekly");
   await expect(page.getByTestId("greeks")).toContainText("computed", { timeout: 15_000 });
 
+  // research: oracle data has 17 sessions => inconclusive, with the failed/passed conditions listed
+  await page.getByRole("button", { name: "Research", exact: true }).click();
+  await page.getByTestId("run-research").click();
+  await expect(page.getByTestId("rs-verdict")).toHaveAttribute("data-verdict", "inconclusive", { timeout: 120_000 });
+  await expect(page.getByTestId("rs-verdict")).toContainText("insufficient sessions");
+  await expect(page.getByTestId("rs-detail")).toContainText("at least 60 sessions");
+  await expect(page.getByTestId("rs-table").locator("tbody tr")).toHaveCount(8);
+  await expect(page.getByTestId("ci-chart").locator("canvas")).toHaveCount(1);
+  await page.getByTestId("label-row").first().click();
+  await expect(page.getByTestId("rs-diag")).toContainText(/(BEARISH INDEX \/ PUT|BULLISH INDEX \/ CALL) CANDIDATE/);
+  await expect(page.getByTestId("rs-detail")).not.toContainText(/independent confirmations/i);
+  await page.getByTestId("rs-open-chart").click();
+  await expect(chart).toBeVisible();
+
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();
   await expect(page.getByTestId("equity")).toBeVisible();

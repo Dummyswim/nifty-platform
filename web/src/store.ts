@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Tf } from "./chart/geometry";
 import type { El } from "./overlay/pick";
 
-export type Page = "chart" | "backtests" | "analytics" | "options" | "settings";
+export type Page = "chart" | "backtests" | "research" | "analytics" | "options" | "settings";
 
 /** Set by the audit drawer: the chart scrolls to the trade and draws its levels. */
 export interface Focus {

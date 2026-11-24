@@ -36,6 +36,12 @@ def engine_run(conn: Connection, payload: dict[str, Any]) -> str:
     return persist_run(conn, r)[0]
 
 
+def research_run(conn: Connection, payload: dict[str, Any]) -> str:
+    from nifty.db.research import run_research
+
+    return run_research(conn, payload)
+
+
 def kite_instruments(conn: Connection, payload: dict[str, Any]) -> str:
     """Download the daily instrument dump, store it as a version and upsert what we use."""
     from nifty.config import get_settings
@@ -76,6 +82,7 @@ def kite_backfill(conn: Connection, payload: dict[str, Any]) -> str:
 HANDLERS: dict[str, Handler] = {
     "backtest": backtest,
     "engine_run": engine_run,
+    "research_run": research_run,
     "kite_instruments": kite_instruments,
     "kite_backfill": kite_backfill,
 }

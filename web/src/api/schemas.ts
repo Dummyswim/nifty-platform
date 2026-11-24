@@ -23,3 +23,7 @@ export type ExpiriesOut = components["schemas"]["ExpiriesOut"];
 export type ChainOut = components["schemas"]["ChainOut"];
 export type ChainSide = components["schemas"]["Side"];
 export type ContractBarsOut = components["schemas"]["ContractBarsOut"];
+export type ResearchIn = components["schemas"]["ResearchIn"];
+export type ResearchRow = components["schemas"]["ResearchRow"];
+export type ResearchOut = components["schemas"]["ResearchOut"];
+export type LabelOut = components["schemas"]["LabelOut"];

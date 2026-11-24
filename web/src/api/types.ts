@@ -575,6 +575,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs */
+        get: operations["runs_api_v1_research_runs_get"];
+        put?: never;
+        /** Create Run */
+        post: operations["create_run_api_v1_research_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/runs/{rid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run */
+        get: operations["run_api_v1_research_runs__rid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/runs/{rid}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Labels */
+        get: operations["labels_api_v1_research_runs__rid__labels_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1017,6 +1069,29 @@ export interface components {
             /** Instruments Updated At */
             instruments_updated_at?: string | null;
         };
+        /** LabelOut */
+        LabelOut: {
+            /** Id */
+            id: number;
+            /** Variant */
+            variant: string;
+            /** Experiment */
+            experiment: string;
+            /** Split */
+            split: string;
+            /** Side */
+            side: string;
+            /**
+             * Signal Bar Start
+             * Format: date-time
+             */
+            signal_bar_start: string;
+            /** Run Id */
+            run_id: string;
+            /** Label */
+            label: string;
+            trade: components["schemas"]["TradeRecord"];
+        };
         /** LoginBody */
         LoginBody: {
             /** Password */
@@ -1236,6 +1311,107 @@ export interface components {
         PrefIn: {
             /** Value */
             value: unknown;
+        };
+        /** ResearchIn */
+        ResearchIn: {
+            /** Snapshot Id */
+            snapshot_id?: string | null;
+            /** Symbol */
+            symbol?: string | null;
+            /** From Date */
+            from_date?: string | null;
+            /** To Date */
+            to_date?: string | null;
+            /** Variants */
+            variants?: string[] | null;
+            /**
+             * Experiments
+             * @description target_pts, one experiment each
+             */
+            experiments?: number[] | null;
+            /**
+             * Cost Pts
+             * @default 0
+             */
+            cost_pts: number;
+            /**
+             * Seed
+             * @default 1
+             */
+            seed: number;
+        };
+        /** ResearchOut */
+        ResearchOut: {
+            /** Research Id */
+            research_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /** Status */
+            status: string;
+            /** Seed */
+            seed: number;
+            /** Cost Pts */
+            cost_pts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Verdict */
+            verdict?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Config Hash */
+            config_hash: string;
+            /** Code Version */
+            code_version: string;
+            /** Splits */
+            splits: {
+                [key: string]: string[];
+            };
+            /** Variants */
+            variants: {
+                [key: string]: unknown;
+            };
+            /** Thresholds */
+            thresholds: {
+                [key: string]: unknown;
+            };
+            /** Progress Cells */
+            progress_cells: number;
+            /**
+             * Result
+             * @description cells (variant x experiment tables), verdict, thresholds
+             */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ResearchRow */
+        ResearchRow: {
+            /** Research Id */
+            research_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Instrument Id */
+            instrument_id: string;
+            /** Status */
+            status: string;
+            /** Seed */
+            seed: number;
+            /** Cost Pts */
+            cost_pts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Verdict */
+            verdict?: string | null;
+            /** Error */
+            error?: string | null;
         };
         /** Row */
         Row: {
@@ -2487,6 +2663,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContractBarsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runs_api_v1_research_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_v1_research_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_api_v1_research_runs__rid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    labels_api_v1_research_runs__rid__labels_get: {
+        parameters: {
+            query?: {
+                variant?: string | null;
+                experiment?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelOut"][];
                 };
             };
             /** @description Validation Error */

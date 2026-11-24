@@ -16,7 +16,7 @@ from nifty.db.session import get_engine
 from nifty.security import hash_password
 
 ORIGIN = "http://127.0.0.1:8080"
-TABLES = "prefs, collector_status, ticks, kite_tokens, instrument_masters, drawings, trades, backtests, jobs, events, overlay_elements, plot_points, engine_runs, engine_configs, bars, datasets, instruments"
+TABLES = "research_labels, research_runs, prefs, collector_status, ticks, kite_tokens, instrument_masters, drawings, trades, backtests, jobs, events, overlay_elements, plot_points, engine_runs, engine_configs, bars, datasets, instruments"
 ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
 
 
