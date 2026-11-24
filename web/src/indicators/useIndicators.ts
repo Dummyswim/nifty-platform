@@ -97,7 +97,9 @@ export function useIndicators(symbol: string, live: { source: string; version: n
     const ov = outs[i * 3 + 2]?.data as OverlaysOut | undefined;
     if (plots) {
       layers.push(...plotLayers(e, plots, TF_SEC[e.default_timeframe as Tf] ?? 300, state[e.id]!.ui));
-      panels.push({ engine: e, panel: plots.panel, times: plots.t });
+      const ui = state[e.id]!.ui;
+      // Balu: "Show Panel", NVS: "Show Table" (both default on); the card is hidden when switched off
+      if (ui.show_panel !== false && ui.show_table !== false) panels.push({ engine: e, panel: plots.panel, times: plots.t });
     }
     if (ov) overlays.push(...ov.overlays.map(toEl));
   });
