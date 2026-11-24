@@ -12,12 +12,12 @@ from nifty.contracts import EngineParams, UiParams
 
 
 class BaluUi(UiParams):
-    show_zones: bool = True
-    show_zone_lbl: bool = True
-    show_gold: bool = True
+    show_zones: bool = Field(default=True, title="Show supply / demand zones")
+    show_zone_lbl: bool = Field(default=True, title="Show zone labels")
+    show_gold: bool = Field(default=True, title="Show golden line")
     gold_tint: bool = False
-    show_cvd: bool = True
-    show_panel: bool = True
+    show_cvd: bool = Field(default=True, title="Show moving line (white step)")
+    show_panel: bool = Field(default=True, title="Show Balu panel card")
     panel_pos: Literal[
         "Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"
     ] = "Top Right"
