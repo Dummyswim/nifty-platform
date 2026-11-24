@@ -57,6 +57,8 @@ export const ROLE_COLOR: Record<string, string> = {
   demand: "#26a69a",
   supply: "#ef5350",
   neutral: "#9aa4b2",
+  ema_fast: "#2962ff",
+  ema_slow: "#9c27b0",
   bull: "#26a69a",
   bear: "#ef5350",
   info: "#4c8dff",

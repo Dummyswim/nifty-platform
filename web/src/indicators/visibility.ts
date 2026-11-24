@@ -11,6 +11,7 @@ export function plotVisible(engineId: string, plot: string, ui: Bag, params: Bag
   if (engineId === "pine.nvs_scalper") {
     if (NVS_BANDS.has(plot)) return !off(ui.show_bands);
     if (NVS_LEVELS.has(plot)) return !off(ui.show_levels);
+    if (plot === "ema_fast" || plot === "ema_slow") return !off(ui.show_ema);
   }
   if (engineId === "pine.balu_zone") {
     if (plot === "golden" || plot === "gold_val") return !off(ui.show_gold);

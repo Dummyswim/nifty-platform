@@ -27,7 +27,7 @@ export function plotLayers(engine: Engine, plots: Plots, barSec: number, ui: Rec
       key: `${engine.id}:${s.name}`,
       name: s.name,
       kind: s.kind,
-      color: roleColor(s.role, overrides) + (THIN.has(s.name) ? "88" : ""),
+      color: roleColor(s.role, overrides) + (THIN.has(s.name) ? "33" : ""), // zone edges: Pine transparency 80
       pane: s.pane,
       t: plots.t,
       v: plots.series[s.name]!,
@@ -59,4 +59,43 @@ export function splitRuns(points: { time: number; value?: number }[]): { time: n
   }
   if (cur.length) runs.push(cur);
   return runs;
+}
+
+/** Pine `fill(a, b)` pairs drawn as shaded bands between two plots of the same engine. */
+const FILL_PAIRS: [string, string][] = [["buy_near", "buy_far"], ["sell_near", "sell_far"]];
+
+export interface BandFill {
+  key: string;
+  color: string; // with alpha
+  pts: { time: number; hi: number; lo: number }[][]; // contiguous runs
+}
+
+/** Shaded bands for every FILL_PAIRS pair present in `layers` (both edges visible), revealed up to
+ *  the cursor and only on candle times (`have`), split where either edge has no value. Pine
+ *  transparency 92 => alpha 0x14. */
+export function bandFills(layers: PlotLayer[], cursor: number | null, have: Set<number>): BandFill[] {
+  const byKey = new Map(layers.map((l) => [l.key, l]));
+  const out: BandFill[] = [];
+  for (const l of layers) {
+    for (const [a, b] of FILL_PAIRS) {
+      if (l.name !== a) continue;
+      const other = byKey.get(l.key.slice(0, -a.length) + b);
+      if (!other) continue;
+      const pa = revealPlot(l, cursor);
+      const pb = revealPlot(other, cursor);
+      const runs: BandFill["pts"] = [];
+      let cur: BandFill["pts"][number] = [];
+      for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+        const x = pa[i]!, y = pb[i]!;
+        if (!have.has(x.time)) continue;
+        if (x.value === undefined || y.value === undefined) {
+          if (cur.length) runs.push(cur);
+          cur = [];
+        } else cur.push({ time: x.time, hi: Math.max(x.value, y.value), lo: Math.min(x.value, y.value) });
+      }
+      if (cur.length) runs.push(cur);
+      out.push({ key: `${l.key}~${b}`, color: l.color.slice(0, 7) + "14", pts: runs });
+    }
+  }
+  return out;
 }

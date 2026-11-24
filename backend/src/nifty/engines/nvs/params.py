@@ -10,12 +10,15 @@ from nifty.contracts import EngineParams, UiParams
 class NvsUi(UiParams):
     show_labels: bool = True
     show_exit_labels: bool = True
+    show_ema: bool = Field(default=True, title="Show EMA fast / slow")
     show_bands: bool = True
     show_levels: bool = True
     show_table: bool = True
     color_buy: str = "#1b9e4b"
     color_sell: str = "#d03a2f"
     color_vwap: str = "#f59e0b"
+    color_ema_fast: str = "#2962ff"  # Pine color.blue
+    color_ema_slow: str = "#9c27b0"  # Pine color.purple
 
 
 class NvsParams(EngineParams):

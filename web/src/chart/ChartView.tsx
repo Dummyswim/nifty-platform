@@ -22,8 +22,9 @@ import {
   fmtIst, hitTest, logicalToTime, mergeCols, movePoints, tickLabel, timeToLogical,
 } from "./geometry";
 import { type DrawItem, DrawingsPrimitive } from "./primitives";
-import { type PlotLayer, revealPlot, splitRuns } from "../overlay/layers";
+import { type PlotLayer, bandFills, revealPlot, splitRuns } from "../overlay/layers";
 import { type El, pickOverlays } from "../overlay/pick";
+import { FillPrimitive } from "../overlay/fill";
 import { OverlayPrimitive } from "../overlay/primitive";
 import { TF_SEC, visibleCount } from "../replay/logic";
 import { type LiveBars, candleStyle, mergeLive } from "../live/messages";
@@ -74,6 +75,7 @@ export function ChartView({
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const prim = useRef(new DrawingsPrimitive());
   const ovPrim = useRef(new OverlayPrimitive());
+  const fillPrim = useRef(new FillPrimitive());
   const plotSeries = useRef(new Map<string, ISeriesApi<"Line" | "Area" | "Histogram">>());
   const onTimesRef = useRef(onTimes);
   onTimesRef.current = onTimes;
@@ -117,6 +119,7 @@ export function ChartView({
       upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350",
       lastValueVisible: true, priceLineVisible: true,
     });
+    series.attachPrimitive(fillPrim.current);
     series.attachPrimitive(ovPrim.current);
     series.attachPrimitive(prim.current);
     chartRef.current = chart;
@@ -277,6 +280,7 @@ export function ChartView({
       }
       s.setData(data as never);
     }
+    fillPrim.current.set(bandFills(plots, cursor, have), cols.current.t);
   }, [plots, cursor, nBars]);
 
   // overlay elements picked for the cursor

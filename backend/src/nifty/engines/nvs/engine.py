@@ -48,8 +48,8 @@ class NvsScalper:
     Params = NvsParams
     plots = [
         PlotSpec(name="vwap", role="vwap", pane="overlay"),
-        PlotSpec(name="ema_fast", role="hidden", pane="overlay"),
-        PlotSpec(name="ema_slow", role="hidden", pane="overlay"),
+        PlotSpec(name="ema_fast", role="ema_fast", pane="overlay"),
+        PlotSpec(name="ema_slow", role="ema_slow", pane="overlay"),
         PlotSpec(name="buy_near", role="buy", pane="overlay"),
         PlotSpec(name="buy_far", role="buy", pane="overlay"),
         PlotSpec(name="sell_near", role="sell", pane="overlay"),
