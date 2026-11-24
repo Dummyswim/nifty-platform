@@ -80,6 +80,6 @@ export interface ZoneStyle {
 export function zoneStyle(meta: Record<string, unknown>): ZoneStyle {
   const s = (meta.status as ZoneStatus | undefined) ?? "active";
   if (s === "mitigated") return { fillAlpha: 0.07, dashed: true };
-  if (s === "projected") return { fillAlpha: 0, dashed: true };
+  if (s === "projected") return { fillAlpha: 0.1, dashed: true }; // Pine: bgcolor transparency 90 (real zones 80)
   return { fillAlpha: 0.18, dashed: false };
 }

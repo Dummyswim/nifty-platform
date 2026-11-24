@@ -41,6 +41,6 @@ test("role tokens map to theme colours, with engine overrides", () => {
 test("zone status styles", () => {
   expect(zoneStyle({ status: "active" })).toEqual({ fillAlpha: 0.18, dashed: false });
   expect(zoneStyle({ status: "mitigated" }).dashed).toBe(true);
-  expect(zoneStyle({ status: "projected" })).toEqual({ fillAlpha: 0, dashed: true });
+  expect(zoneStyle({ status: "projected" })).toEqual({ fillAlpha: 0.1, dashed: true });
   expect(zoneStyle({}).dashed).toBe(false);
 });
