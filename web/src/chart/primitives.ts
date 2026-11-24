@@ -10,7 +10,7 @@ import type {
   Time,
 } from "lightweight-charts";
 import type { DrawingKind } from "../api/schemas";
-import { type Shape, type TP, timeToLogical } from "./geometry";
+import { type Shape, type TP, logicalX, timeToLogical } from "./geometry";
 
 export interface DrawItem {
   id: string;
@@ -53,7 +53,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private x(t: number): number | null {
     const lg = timeToLogical(this.times, t);
     if (lg === null || !this.chart) return null;
-    return this.chart.timeScale().logicalToCoordinate(lg as Logical);
+    const ts = this.chart.timeScale();
+    return logicalX(lg, (i) => ts.logicalToCoordinate(i as Logical));
   }
   private y(p: number): number | null {
     return this.series ? this.series.priceToCoordinate(p) : null;

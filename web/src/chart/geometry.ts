@@ -168,3 +168,16 @@ export function tickLabel(t: number, type: number): string {
   if (type === 1 || type === 2) return fmtIst(t, "day");
   return fmtIst(t, "time");
 }
+
+/** Pixel x of a possibly fractional bar index. Whole bars come from the chart (`toX`); a fraction is
+ *  interpolated between its two neighbours, because the chart's own conversion is only reliable on
+ *  whole bars (a time inside the overnight gap, e.g. a replay cursor at 15:30, gave x = 0). */
+export function logicalX(lg: number, toX: (i: number) => number | null): number | null {
+  const i = Math.floor(lg);
+  const c0 = toX(i);
+  if (c0 === null) return null;
+  const f = lg - i;
+  if (f === 0) return c0;
+  const c1 = toX(i + 1);
+  return c1 === null ? c0 : c0 + f * (c1 - c0);
+}

@@ -1,5 +1,5 @@
 import type { IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, Logical, SeriesAttachedParameter, SeriesType, Time } from "lightweight-charts";
-import { timeToLogical } from "../chart/geometry";
+import { logicalX, timeToLogical } from "../chart/geometry";
 import type { BandFill } from "./layers";
 
 /** Shaded areas between two plot lines (Pine `fill`), drawn under the candles' series. */
@@ -33,7 +33,7 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
         const ts = chart.timeScale();
         const x = (t: number) => {
           const lg = timeToLogical(this.times, t);
-          return lg === null ? null : ts.logicalToCoordinate(lg as Logical);
+          return lg === null ? null : logicalX(lg, (i) => ts.logicalToCoordinate(i as Logical));
         };
         target.useMediaCoordinateSpace(({ context: ctx }) => {
           for (const f of this.fills) {

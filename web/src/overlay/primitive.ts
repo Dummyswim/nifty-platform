@@ -9,7 +9,7 @@ import type {
   SeriesType,
   Time,
 } from "lightweight-charts";
-import { timeToLogical } from "../chart/geometry";
+import { logicalX, timeToLogical } from "../chart/geometry";
 import { type El, roleColor, zoneStyle } from "./pick";
 
 /** Draws every OverlayElement kind (line step_line hline band zone marker label region) as one
@@ -40,7 +40,8 @@ export class OverlayPrimitive implements ISeriesPrimitive<Time> {
 
   private x = (t: number): number | null => {
     const lg = timeToLogical(this.times, t);
-    return lg === null || !this.chart ? null : this.chart.timeScale().logicalToCoordinate(lg as Logical);
+    const ts = this.chart?.timeScale();
+    return lg === null || !ts ? null : logicalX(lg, (i) => ts.logicalToCoordinate(i as Logical));
   };
   private y = (p: number | null): number | null =>
     p === null || !this.series ? null : this.series.priceToCoordinate(p);

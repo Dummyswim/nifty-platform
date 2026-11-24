@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  type Cols, emptyCols, fmtIst, hitTest, logicalToTime, mergeCols, movePoints, tickLabel, timeToLogical,
+  type Cols, emptyCols, fmtIst, hitTest, logicalToTime, logicalX, mergeCols, movePoints, tickLabel, timeToLogical,
 } from "./geometry";
 
 const T5 = [0, 300, 600, 900, 1200]; // 5m bars
@@ -73,4 +73,13 @@ test("IST labels", () => {
   expect(tickLabel(t, 3)).toBe("09:30");
   expect(fmtIst(t)).toContain("09:30");
   expect(tickLabel(t, 2)).toBe("02 Nov");
+});
+
+test("logicalX interpolates fractions between whole bars", () => {
+  const toX = (i: number) => (i < 0 || i > 100 ? null : 10 + i * 8); // 8 px per bar
+  expect(logicalX(3, toX)).toBe(34);
+  expect(logicalX(3.5, toX)).toBe(38);
+  expect(logicalX(99.005, toX)).toBeCloseTo(802.04); // a time in the overnight gap: just after the last bar, never 0
+  expect(logicalX(100.5, toX)).toBe(810); // no right neighbour: the bar itself
+  expect(logicalX(-1, toX)).toBeNull();
 });
