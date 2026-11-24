@@ -8,6 +8,7 @@ non-finite values after warmup, event/trade counts per type. With --tv-trades al
 TradingView "List of trades" export (entries/exits matched within one bar). Descriptive only."""
 
 import argparse
+import json
 import random
 import resource
 import sys
@@ -42,7 +43,9 @@ def main() -> int:
     ap.add_argument("--cuts", type=int, default=3)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--tv-trades", type=Path)
+    ap.add_argument("--params", default="{}", help="engine params as JSON")
     a = ap.parse_args()
+    params = json.loads(a.params)
     load_builtin_engines()
     cal = Calendar.load()
     with get_engine().connect() as c:
@@ -56,17 +59,17 @@ def main() -> int:
     print(f"{a.engine} on {ins.instrument_id}: {len(bars)} 1m bars, {len(sessions)} sessions, tf {tf}")
     kw = {"instrument": ins, "calendar": cal, "source_id": "stability", "allow_unready": True}
     t = time.perf_counter()
-    batch = run_batch(a.engine, {}, bars, tf, **kw)
+    batch = run_batch(a.engine, params, bars, tf, **kw)
     dt = time.perf_counter() - t
     print(f"batch: {len(batch.plots)} chart bars in {dt:.1f}s ({len(batch.plots) / dt:,.0f}/s), peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024} MB")
     vb, ok = view(batch), True
     t = time.perf_counter()
-    same = view(run_incremental(a.engine, {}, bars, tf, **kw)) == vb
+    same = view(run_incremental(a.engine, params, bars, tf, **kw)) == vb
     print(f"incremental == batch: {same} ({time.perf_counter() - t:.1f}s)")
     ok &= same
     rng = random.Random(a.seed)
     for cut in sorted(rng.sample(range(50, len(batch.plots) - 50), a.cuts)):
-        same = view(run_with_restart(a.engine, {}, bars, tf, cut=cut, **kw)) == vb
+        same = view(run_with_restart(a.engine, params, bars, tf, cut=cut, **kw)) == vb
         print(f"restart after chart bar {cut} == batch: {same}")
         ok &= same
     warm = get_spec(a.engine, allow_unready=True).cls.warmup_bars
