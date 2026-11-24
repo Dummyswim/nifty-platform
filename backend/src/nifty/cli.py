@@ -385,6 +385,54 @@ def _kite_smoke(a: argparse.Namespace) -> int:
     return 1 if fails else 0
 
 
+def research_counts(conn: Connection, symbol: str) -> list[str]:
+    """Outcome counts per baseline x experiment (target 10/20) on stored 1m bars; counts only."""
+    from collections import Counter
+
+    from nifty.db.bars import read_bars
+    from nifty.engines.base import load_builtin_engines
+    from nifty.engines.runner import run_batch
+
+    load_builtin_engines()
+    ins = _find(conn, symbol)
+    if ins is None:
+        return [f"unknown symbol {symbol!r}; import data first"]
+    cal = Calendar.load()
+    bars = read_bars(conn, ins.instrument_id, "1m")
+    lines = [
+        f"research.distance_entry_v1 on {symbol} 1m ({len(bars)} bars; stop 12, hold 10, cost 0): "
+        "counts only, no performance claim",
+        f"{'baseline':<30}{'tgt':>4}{'n':>5}{'TARGET':>8}{'STOP':>6}{'TIME':>6}{'ambig':>6}{'cut':>5}{'gap':>5}",
+    ]
+    for base in (
+        "anchor_cross_ema_order",
+        "ema_gap_reexpansion",
+        "ema_aligned_gap_reexpansion",
+        "armed_resumption",
+    ):
+        for tgt in (10, 20):
+            r = run_batch(
+                "research.distance_entry_v1", {"baseline": base, "target_pts": tgt}, bars, "1m",
+                instrument=ins, calendar=cal, source_id="counts",
+            )  # fmt: skip
+            c = Counter(t.exit_reason for t in r.trades)
+            fl = Counter(f for t in r.trades for f in t.flags)
+            lines.append(
+                f"{base:<30}{tgt:>4}{len(r.trades):>5}{c['TARGET_FIRST']:>8}{c['STOP_FIRST']:>6}"
+                f"{c['TIME_EXIT']:>6}{fl['ambiguous_bar']:>6}{fl['session_cut']:>5}{fl['data_gap']:>5}"
+            )
+    return lines
+
+
+def _research_counts_cli(a: argparse.Namespace) -> int:
+    from nifty.db.session import get_engine
+
+    with get_engine().connect() as conn:
+        lines = research_counts(conn, a.symbol)
+    print("\n".join(lines[:20]))
+    return 0
+
+
 def _demo_replay(a: argparse.Namespace) -> int:
     import logging
 
@@ -454,6 +502,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--probe-limits", action="store_true", help="also test the 60/61-day minute range"
     )
+    p = sub.add_parser("research-counts", help="outcome counts per baseline x experiment")
+    p.add_argument("--symbol", default="NIFTY 50")
     p = sub.add_parser(
         "demo-replay", help="replay the oracle sessions as live ticks (demo:NIFTY 50)"
     )
@@ -495,6 +545,10 @@ def main(argv: list[str] | None = None) -> int:
         return _kite_backfill(args)
     elif args.cmd == "kite-smoke":
         return _kite_smoke(args)
+    elif args.cmd == "research-counts":
+        return _research_counts_cli(args)
+    elif args.cmd == "research-counts":
+        return _research_counts_cli(args)
     elif args.cmd == "demo-replay":
         return _demo_replay(args)
     elif args.cmd == "parity":

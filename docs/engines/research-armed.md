@@ -1,0 +1,14 @@
+# Armed-resumption spec (`research.distance_entry_v1`, baseline `armed_resumption`)
+
+Chosen by the user (C13): **pullback break**. 1m chart, completed bars only, paper only. Source: research prompt §7; spec/07. All numbers are Params (defaults shown).
+
+**Context** (direction): `bull` if EMA9 > EMA21, `bear` if EMA9 < EMA21 at the bar; equal or NaN = no context. A change of sign, a new session, an entry or an exit resets the machine (cancel `regime_flip` / `session`) and the arm counter.
+**Pullback** (bull; bear mirrored): a run of `pullback_min..pullback_max` (2..5) consecutive completed bars, each with close < the previous bar's close. Colour is irrelevant (an opposite-colour candle is not invalidation). `research.watch` fires when the run first reaches `pullback_min`.
+**Arming**: the first completed bar after a valid run whose close > previous close (closes back with the direction). Frozen at arming: `trigger` = highest high of the pullback bars, `invalidation` = lowest low of the pullback bars (bear: lowest low / highest high), `expiry` = `armed_bar + arm_expiry_bars` (5), `arms_used += 1`. The arming bar is never evaluated for the trigger.
+**Risk budget**: if `trigger − invalidation` (bull) is wider than `stop_pts` (12) the setup is skipped (`research.invalidated`, reason `risk_budget`); a stop is never widened.
+**Trigger**: a completed close beyond `trigger` (`trigger_mode=close`, the only mode on 1m: `intrabar` needs lower-timeframe/tick evidence and raises `ConfigError`). The signal is known at that close; the fill is the NEXT bar's open (D06). If that open is outside the entry window (09:30–14:45 IST) the signal is cancelled (`window`).
+**Invalidation**: a completed close beyond `invalidation` (bull: below the pullback low): `research.invalidated` reason `invalidation`. **Timeout**: no trigger by the expiry bar: reason `expired`.
+**Rearming**: a setup that expired or was invalidated may be replaced by ONE further arming in the same context run (`max_rearms = 1`, i.e. at most 2 armings per run); after that the machine stays idle until the context flips, a new session starts or a trade completes.
+**Position**: one at a time; no arming while a position or a pending entry exists. Stop `stop_pts`, target `target_pts` (10 or 20, separate experiments), both anchored to the ACTUAL entry open; max hold `max_hold_bars` (10) bars counted from the entry bar inclusive; time exit at that bar's close with the actual directional return; session cut exits at the last bar's close (flag `session_cut`).
+**Outcomes**: `TARGET_FIRST | STOP_FIRST | TIME_EXIT`; both barriers in one bar => `STOP_FIRST` + `ambiguous_bar` (conservative mode, `resolve_barriers` semantics); gaps in the bar series during a trade => flag `data_gap`. Nothing is dropped from denominators.
+**Not claimed**: that this setup has any edge. No stop widening, partials, breakeven, trailing, pyramiding or reverse-on-profit.

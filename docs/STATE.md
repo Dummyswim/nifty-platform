@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C13
-last_update: 2026-11-24 (C12)
+next_chunk: C14
+last_update: 2026-11-24 (C13)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (live verified 2026-11-23: login, profile, master, 1m candles)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -20,7 +20,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C10 | done | Balu 2: zones, key levels, location, pressure (+EARLY), sweeps (ready=False) |
 | C11 | done | Balu 3: path history, 13-row panel, alerts, snapshot/restore; `pine.balu_zone` ready=True |
 | C12 | done | options chain/Greeks/recording window/paper mapping + Options page |
-| C13 | pending | research engine: features, baselines, armed, outcomes |
+| C13 | done | research engine `research.distance_entry_v1`: features, 3 baselines, armed resumption, outcomes |
 | C14 | pending | research runs, statistics, verdict, UI |
 | C15 | pending | hardening, lockfiles, handoff |
 
@@ -81,11 +81,13 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Recording: collector (`kite_run.make_planner`) subscribes ATM +- window for the chosen expiries in `full` mode on part 0 of the stream (`KiteStream.update(add, remove)`, the stored set follows, so reconnects resubscribe the current window); option 1m bars come from ticks via `Pipeline.add_feed` (no engines); ticks keep bid/ask/oi. Nothing is ever synthesised from index candles. Dev DB shows contracts as "not recorded" until the collector runs in market hours (UNVERIFIED live).
 - Paper mapping: BUY -> CE, SELL -> PE (long premium), strike type + expiry kind resolved from the contracts listed at ENTRY time (`effective_today`), entry at the ask of the last recorded tick <= entry time, exit at the bid of the last tick <= exit time, each at most `max_stale_s` old (default 60 s) else the trade is skipped: `no_quote` (or `no_contract` when nothing listed/lot size missing) and counted in `summary.option`; the index trade stays unchanged. `synthetic=true` unless the exit was clock-based (EOD/TIME/SESSION_END). `pnl_inr = (exit_prem - entry_prem) * lots * lot_size - cost_inr`, `roi_pct` on the premium outlay; `Prem`/`Inr` unit types, `UnitMismatch` tested. Backtest payload `option_policy {strike_type, expiry_kind, lots, cost_inr, max_stale_s}` (part of the backtest id); Backtests page: option columns + cards (Option P&L, no quote / no contract).
 - Fixture: `fixtures/options_demo/` (SYNTHETIC, `build.py: seed(conn, now)`), used by `tests/test_options_api.py` and `make e2e` (nifty_test only, never the dev DB).
+- Research (C13): engine `research.distance_entry_v1` v1, `ready=True`, `default_timeframe=1m`, package `nifty.engines.research` (`params.py` `ResearchParams`, `features.py` `FeatureState/Features`, `baselines.py` `BASELINES`, `armed.py` `ArmedMachine`, `outcomes.py` `Position/Resolved`, `engine.py`). Params: `baseline` (anchor_cross_ema_order | ema_gap_reexpansion | ema_aligned_gap_reexpansion | armed_resumption), `target_pts` 10 (20 = a separate experiment), `stop_pts` 12, `max_hold_bars` 10, entry window 930-1445 (fill bar start), `cost_pts`, ema 9/21, atr 14, `rate_k` 3, `anchor_proxy`, armed knobs (`pullback_min/max` 2..5, `arm_expiry_bars` 5, `max_rearms` 1, `trigger_mode` close only: intrabar => ConfigError). Events `research.watch|armed|entry|exit|invalidated` (payload reasons: invalidation, expired, risk_budget, regime_flip, session, window); `research.exit` carries outcome TARGET_FIRST|STOP_FIRST|TIME_EXIT, mae/mfe, first_minute_adverse_pts, drawdown_pts (close-to-close), time_to_barrier_bars, containing_bar_start, flags (ambiguous_bar, session_cut, data_gap, gap_through_stop). Trades (`execution_mode=conservative`, exit_reason = outcome, r_multiple = net/stop) come out of the engine; plots ema_fast ema_slow anchor (+ hidden d e m anchor_rate gap_rate a); `panel()` = baseline, state, D, E, M, rates, A, anchor kind. Armed spec: `docs/engines/research-armed.md` (user chose "pullback break"). CLI `python -m nifty.cli research-counts [--symbol]` prints counts per baseline x target (no performance claims).
 - Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e kite-smoke live demo start init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C13: armed-setup choices are the user's ("pullback break"); logged extras: the arming bar is never evaluated for the trigger; a `risk_budget` skip consumes one of the 2 armings; pullback bars are defined by close vs the previous close (not colour); gap/anchor rates need k same-session bars (also for the EMA gap rate, so nothing bridges a session); baselines emit no watch/armed events; `research.invalidated` reasons `window`/`session` cancel a pending entry. Engine ruff E501 ignored under `src/nifty/engines/research/**`.
 - C12: strike-type offsets are ours (5/2/0/2/5 steps, editable); `options.r` has no default. Greeks use the last traded price (not mid) to back out IV. Option OI is derived from recorded ticks (no new table). Option contracts are hidden from the chart's instrument list (they open from the Options page). Test fixture cleanup now also truncates `prefs`. UNVERIFIED live: the dynamic subscription/window recording against Kite (only the fake-server test covers it).
 - C11: no Pine/map mismatch found. The "BUY?"/"SELL?" panel text exists in `panel.rows` (provisional flag) but `panel()` only reflects confirmed bars, so it is never shown today. Alert events keep type `alert` + `payload.kind`; `divergence` events (C09) are unchanged. Ruff E501 is ignored under `src/nifty/engines/balu/**` (Pine-port tables). Web: Backtests new-run form defaults to `pine.nvs_scalper` (Balu produces no trades); EnginePanel CSS knows supply/demand roles. Fixed `kite_status` to validate with its injected `now` (it used the wall clock, which broke a test once the real time passed the fixture token's expiry).
 - C10: Pine/BALU-2 agree, no mismatch found. `zones_up`/`zones_dn` are defined as the number of live supply zones above / demand zones below price (BALU-2 lists the names only). Extra plot `zones_size` carries `zones.size()` for the debug plot. Alert events use type `alert` with `payload.kind` (the BALU docs name the alerts but not the event type). `SERIES["pine.balu_zone"]` extended with the C10 dbg_* plots.
@@ -99,18 +101,14 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - C03: Pine L278 `barstate.isconfirmed` (missing from the port map) is honoured: no `signal` while `ctx.provisional`. `run_batch` skips the 1m aux buffer when fed chart-tf bars (TV golden input). `docs/prompts/` (untracked user copy of C03) left alone.
 - C03: golden dir `fixtures/tv_golden/<engine_id>` (spec/04) and RUNBOOK's `.../nvs` both accepted. NVS plot `buy/sell_near/far` are always computed (the Pine `showBands` toggle is UI only). `volume_kind=absent` forces TWAP even if a volume value is present. Stop/target overlay lines show the INITIAL levels; BE ratchets are `stop_update` events.
 - Chart bars handed to engines carry NO `quality_flags` (partial/gap flags use later data = lookahead and differ batch vs incremental). Engines see `volume_kind` and finalized bars only; flags remain on stored/resampled bars.
-- D07 run key includes `timeframe` (config_hash does not cover it). Trades are not persisted in C02 (C04 `trades`).
 - Tests live in `backend/tests/unit/{engines,execution,contracts}/`; `make test T=backend/tests/...` strips the `backend/` prefix. Test engine `test.sma_cross` is in `backend/tests/sma_cross_engine.py` (registered only inside tests).
 - `prior_day` = previous session present in the data (e.g. Wed 11-11 sees Mon 11-09, no data on 11-10).
 - Conservative mode MFE on a STOP bar = 0 (no credit for favourable moves), MAE clipped at the stop; tv mode uses the O-H-L-C path. Tie `(high-open)==(open-low)` => path O-L-H + flag `uncertain_path`.
 - `atr_sess` = Wilder ATR where TR resets to high-low on a session's first bar; smoothing stays continuous (spec/07 L14).
-- `EngineSpec.cls`/`register_engine` are typed `type[Any]` (mypy cannot express protocol class attributes).
 - Unit types are float subclasses, not `typing.NewType` (NewType cannot raise `UnitMismatch`). Not used on the per-bar hot path (D27).
 - `calendar_unverified` is reported on `ValidationReport`, not stored per bar (it would change bar identity when the calendar is edited). Per-bar flags stored: `gap_before`, `volume_absent`, `partial_bucket` (resample only).
 - Validation adds exclusion reasons `non_finite bad_ohlc bad_volume off_session non_session_day` beside `off_grid`; reports `out_of_order` (sorted, never silent). Gaps are interior only; session start/end shortfalls appear in `sessions`.
 - `resample`: `partial_bucket` = bucket reaches outside the session's data extent or past the session close; `gap_before` = missing slots inside the extent. Accepts any dividing input tf; 1d->1d is identity.
-- `ruff` per-file ignore E501 for alembic/ and tests/; mypy `ignore_missing_imports` for yaml (no types-PyYAML dep).
-- `/readyz` head revision now derived from `backend/alembic` via ScriptDirectory.
 - AGENTS.md's venv path is a stale Mac path; real local venv is `/home/balaj/projects/practicalenv` (user-confirmed). Only in Makefile.local.
 - `setup-reference.sh` can't copy (Mac source path); `reference/` was already populated, `sha256sum -c SHA256SUMS` all OK. Script left unchanged.
 - No Docker on this WSL host (user: continue without). Docker-dependent acceptance deferred, see Open issues.
@@ -119,8 +117,8 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
+- `anchor_cross_ema_order` is OUR interpretation (prompt does not define the crossover): prev close <= prev V and close > V (mirrored) with F > S (F < S). Check it before reading any result. Oracle counts (5,996 bars, stop 12, hold 10): 97/94 (anchor cross), 437/401 (gap re-expansion), 267/251 (aligned), 29/29 (armed) trades for target 10/20; counts only.
 - Balu golden export: see the C11 reply (RUNBOOK §Golden). `golden_tv` stays `none` until you confirm both files exist (`fixtures/tv_golden/nvs/*`, `fixtures/tv_golden/balu/ohlc_plots.csv`).
-- Balu golden (fixtures/tv_golden/balu/ohlc_plots.csv) is exported once after C11 (RUNBOOK §Golden, `BALU_DEBUG_PLOTS.pine.txt`); until then the Tier-A test skips with `golden missing`.
 - C08 live Kite is user-only (market hours): Connect Kite, then `make live` (needs the API/worker running as in C07), open the app, Chart -> Live on NIFTY 50, and check Settings/collector status; paste anything odd (packet endianness and the WS entitlement are unverified).
 - Kite live verified 2026-11-23 (make kite-smoke PASS: profile, 4541 NIFTY master rows, 375 1m candles; minute range of 61 days accepted, so the real day limit is above 60 and still unknown; WebSocket entitlement untested until C08). Dev DB has the instrument master and a token that expires 06:00 IST.
 - golden_tv=none: NVS golden not exported yet; `make parity` prints `golden missing` for it. Export steps: RUNBOOK §Golden (user to confirm when files exist).
@@ -131,8 +129,6 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Oracle CSV has no data for Tue 2026-11-10 (18 weekdays, 17 sessions). Not added to the calendar (never guess holidays). User: confirm whether it was a market holiday and fill `data/calendar.yml`.
 - `calendar_days` table is created but nothing loads `data/calendar.yml` into it yet.
 - Deferred (no Docker): `docker compose config -q`, image pulls/tags, `make up`/`down`/`db-q` (db-q is Docker-only; use `psql "${DATABASE_URL/+psycopg/}"`). Compose stack untested.
-- `python -m nifty.worker` / `nifty.collector` (compose profiles) have no entrypoints until C04/C08.
-- AGENTS.md still names the Mac venv; user may want to update it.
 - NVS: `anchor_mode=fill_price` is the twin's convention but is not exercised against the oracle (decline rule uses 1.25*maxRisk like the twin; stop stays mintick-rounded).
 
 ## Facts discovered (environment, data, Kite; keep short)
@@ -141,4 +137,3 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - Native DB verified 2026-11-23: `make migrate` -> rev 0001, timescaledb ext + prefs present, `nifty_test` DB test passes, live /healthz 200, /readyz 200, /auth/me 401 unauth. Needed PGDG repo for pg 18.7 (Ubuntu has 18.6; Timescale 2.32 needs >=18.7). Role is SUPERUSER (dev only).
 - WSL Ubuntu 26.04, Python 3.14.4, node 22.22, npm 9.2; apt offers postgresql 18, redis 8.0; timescaledb needs Timescale's apt repo.
 - Resolved deps (3.14 wheels all available): fastapi 0.165, sqlalchemy 2.1.9, alembic 1.20, pydantic 2.14, psycopg 3.3.9, numpy 2.5, pandas 3.1.
-- `make check` green (C02): ruff, format, mypy strict, pytest 130 incl. DB tests (nifty_test), tsc, vitest. Oracle import + snapshot numbers from C01 unchanged. Dev DB migrated to 0003.
