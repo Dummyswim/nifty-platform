@@ -29,7 +29,7 @@ export function Chart() {
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
-  const ind = useIndicators(symbol, live && iid ? { source: `live:${iid}`, version: ver } : null);
+  const ind = useIndicators(symbol, tf, live && iid ? { source: `live:${iid}`, version: ver } : null);
   const [times, setTimes] = useState<number[]>([]);
   const overlays = useMemo(() => [...ind.overlays, ...(focus?.extra ?? [])], [ind.overlays, focus]);
   const qc = useQueryClient();
