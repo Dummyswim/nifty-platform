@@ -103,9 +103,10 @@ def test_contract_bars_have_volume_oi_and_coverage_flags(seeded: Any) -> None:
     e0 = f"{info['expiries'][0]:%y%m%d}"
     cid = f"kite:NFO:NIFTYDEMO{e0}25000CE"
     r = c.get("/api/v1/options/contract-bars", params={"contract_id": cid}).json()
-    assert (
-        r["coverage"]["recorded"] and r["coverage"]["n_bars"] == 3 and r["coverage"]["n_ticks"] == 3
-    )
+    cov = r[
+        "coverage"
+    ]  # intermittent failure seen twice in full runs: keep the values in the message
+    assert cov["recorded"] and cov["n_bars"] == 3 and cov["n_ticks"] == 3, cov
     assert len(r["bars"]["t"]) == 3 and r["bars"]["v"] == [100.0, 200.0, 300.0]
     assert len(r["oi"]["t"]) == 3 and r["oi"]["v"][-1] == 1_020.0
     none = c.get(

@@ -26,6 +26,9 @@ export function Chart() {
   const { symbol, tf, restored, focus, set } = useUi();
   const cursor = useReplay((r) => r.cursor);
   const [live, setLive] = useState(false);
+  // indicator settings live in a sidebar next to the chart (never over the candles); remembered per browser
+  const [showInd, setShowInd] = useState(() => { try { return localStorage.getItem("nifty.indicators.open") !== "0"; } catch { return true; } });
+  const toggleInd = () => setShowInd((v) => { try { localStorage.setItem("nifty.indicators.open", v ? "0" : "1"); } catch { /* private mode */ } return !v; });
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
@@ -100,6 +103,7 @@ export function Chart() {
             </button>
           ))}
         </div>
+        <button className={showInd ? "on" : ""} aria-pressed={showInd} onClick={toggleInd} data-testid="toggle-indicators">Indicators</button>
         <div className="seg" role="group" aria-label="Drawing tools">
           {TOOLS.map((t) => (
             <button key={t.id} className={t.id === tool ? "on" : ""} aria-pressed={t.id === tool} data-tool={t.id} onClick={() => setTool(t.id)}>
@@ -114,6 +118,7 @@ export function Chart() {
           {bn.connectKite && <button className="ghost" onClick={() => useUi.getState().set({ page: "settings" })}>Connect Kite</button>}
         </div>
       )}
+      <div className="chart-row">
       {ready && (
         <ChartView
           symbol={symbol}
@@ -133,7 +138,8 @@ export function Chart() {
           liveBars={live ? sub.bars : null}
         />
       )}
-      <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
+      {showInd && <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />}
+      </div>
       <div className="cards">
         {ind.panels.map((p) => <EnginePanel key={p.engine.id} id={p.engine.id} panel={p.panel} atEnd={cursor === null} />)}
       </div>
