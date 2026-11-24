@@ -73,7 +73,7 @@ def main() -> int:
         print(f"restart after chart bar {cut} == batch: {same}")
         ok &= same
     warm = get_spec(a.engine, allow_unready=True).cls.warmup_bars
-    bad = Counter(k for _, p in batch.plots[warm:] for k, v in p.items() if isinstance(v, float) and v != v or v in (float("inf"), float("-inf")))
+    bad = Counter(k for _, p in batch.plots[warm:] for k, v in p.items() if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))))
     print(f"non-finite plot values after warmup: {dict(bad) or 'none'}")
     print("events:", dict(Counter(e.event_type for e in batch.events)) or "none", "| trades:", len(batch.trades))
     print("overlays:", len(batch.overlays), "| panel:", "yes" if batch.panel else "no")

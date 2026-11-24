@@ -115,6 +115,22 @@ def pct(xs: list[float], q: float) -> float:
     return s[min(len(s) - 1, int(q * len(s)))] if s else float("nan")
 
 
+def warmup_start(cal: Calendar, day: date) -> datetime:
+    """Start of the history the collector replays when it starts before the open of `day`: the last
+    WARMUP_SESSIONS sessions ending with the previous session (collector `rebuild_runs`). A restart
+    mid-session shifts this window by one session, which can make a few early events differ."""
+    from nifty.collector.service import WARMUP_SESSIONS
+
+    d = day - timedelta(days=1)
+    while not cal.is_session_day(d):
+        d -= timedelta(days=1)
+    for _ in range(WARMUP_SESSIONS - 1):
+        d -= timedelta(days=1)
+        while not cal.is_session_day(d):
+            d -= timedelta(days=1)
+    return cal.session_bounds(d)[0]
+
+
 def report(day: date, symbol: str) -> int:
     from nifty.db.bars import read_bars
     from nifty.db.instruments import find_instrument
@@ -167,8 +183,7 @@ def report(day: date, symbol: str) -> int:
             md.append(f"- {eid} ({tf}): " + (", ".join(f"{k} {v}" for k, v in sorted(by.items())) or "no events"))
             # --- D14: batch rerun on the stored bars must give the same confirmed events
             params = c.execute(text("SELECT params FROM engine_configs WHERE config_hash=:h AND engine_id=:e"), {"h": chash, "e": eid}).scalar() or {}
-            warm = lo - timedelta(days=10)
-            bars = read_bars(c, iid, "1m", warm, hi)
+            bars = read_bars(c, iid, "1m", warmup_start(cal, day), hi)
             res = run_batch(eid, params, bars, tf, instrument=ins, calendar=cal)
             batch = {(e.event_type, e.bar_start_utc) for e in res.events if lo <= e.bar_start_utc < hi}
             live = {(t, b) for t, b, _, _ in evs}

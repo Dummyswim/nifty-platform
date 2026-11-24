@@ -66,9 +66,8 @@ class Feed:
     builder: BarBuilder
     runs: list[LiveRun] = field(default_factory=list)
     run_ids: dict[str, str] = field(default_factory=dict)
-    default_tf: dict[str, bool] = field(
-        default_factory=dict
-    )  # run label -> is the engine default tf
+    # run label (engine@tf) -> True for the default timeframe (the only run doing early alerts)
+    default_tf: dict[str, bool] = field(default_factory=dict)
 
 
 class Pipeline:
