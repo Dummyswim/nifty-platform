@@ -25,7 +25,7 @@ SHORT = {"pine.nvs_scalper": "nvs", "pine.balu_zone": "balu"}
 
 # TradingView plot titles -> engine plot names (Pine L322-334)
 SERIES: dict[str, dict[str, str]] = {
-    # C09+C10 series (C11 appends): the `dbg_<name>` plots of BALU_DEBUG_PLOTS.pine.txt
+    # C09-C11 series: the `dbg_<name>` plots of BALU_DEBUG_PLOTS.pine.txt
     "pine.balu_zone": {
         "dbg_atr": "atr", "dbg_goldVal": "gold_val", "dbg_goldState": "gold_state",
         "dbg_regimeIdx": "regime_idx", "dbg_cvd": "cvd", "dbg_movingLine": "moving_line_raw",
@@ -33,7 +33,9 @@ SERIES: dict[str, dict[str, str]] = {
         "dbg_dayLen": "day_len", "dbg_orHigh": "or_high", "dbg_orLow": "or_low",
         "dbg_poolSize": "pool_size", "dbg_nextUp": "next_up", "dbg_nextDn": "next_dn",
         "dbg_locIdx": "loc_idx", "dbg_fpImbNow": "fp_imb", "dbg_fpTot": "fp_tot", "dbg_fpN": "fp_n",
-        "dbg_zonesSize": "zones_size",
+        "dbg_zonesSize": "zones_size", "dbg_stateId": "state_id", "dbg_nUp": "n_up",
+        "dbg_nDn": "n_dn", "dbg_nTimeout": "n_timeout", "dbg_nBoth": "n_both", "dbg_nCut": "n_cut",
+        "dbg_nPending": "n_pending", "dbg_sampleDays": "sample_days",
     },
     "pine.nvs_scalper": {
         "VWAP (TWAP if no volume)": "vwap", "EMA fast": "ema_fast", "EMA slow": "ema_slow",

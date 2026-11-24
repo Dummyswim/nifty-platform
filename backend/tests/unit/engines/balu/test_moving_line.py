@@ -93,7 +93,9 @@ D_1 = [
 def test_bearish_divergence_is_signalled_on_the_confirming_bar_not_back_dated() -> None:
     h = Harness(div_pivot_len=2, **NOHTF)
     h.day(D1, pattern(H1, D_1))
-    events = [(i, e) for i, o in enumerate(h.outs) for e in o.events]
+    events = [
+        (i, e) for i, o in enumerate(h.outs) for e in o.events if e.event_type == "divergence"
+    ]
     # pivot highs: bar 3 (105, cvd 6) confirmed at bar 5 (no earlier pivot: no signal), bar 8
     # (108 > 105, cvd -2 < 6) confirmed at bar 10 => BEARISH divergence on bar 10, two bars after the swing
     assert [(i, e.event_type, e.payload["side"]) for i, e in events] == [(9, "divergence", "bear")]
@@ -111,10 +113,10 @@ def test_divergence_memory_resets_on_a_new_session() -> None:
     # day 2: a HIGHER pivot (110 > 108) with a LOWER cvd (-6 < -2): would be bearish if yesterday's
     # pivot survived; lastPH is NaN again on the new session, so nothing fires
     h.day(D2, pattern([100, 101, 110, 101, 100], [-2] * 5))
-    assert [e for o in h.outs[12:] for e in o.events] == []
+    assert [e for o in h.outs[12:] for e in o.events if e.event_type == "divergence"] == []
 
 
 def test_divergence_is_off_with_show_div_false_and_needs_dayLen_above_2L() -> None:
     off = Harness(div_pivot_len=2, show_div=False, **NOHTF)
     off.day(D1, pattern(H1, D_1))
-    assert [e for o in off.outs for e in o.events] == []
+    assert [e for o in off.outs for e in o.events if e.event_type == "divergence"] == []

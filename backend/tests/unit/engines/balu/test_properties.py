@@ -29,7 +29,9 @@ def bars():  # type: ignore[no-untyped-def]
 
 
 def view(r: RunResult) -> dict[str, object]:
-    return {"plots": r.plots, "events": r.events, "overlays": r.overlays, "cfg": r.config_hash}
+    return {
+        "plots": r.plots, "events": r.events, "overlays": r.overlays, "panel": r.panel, "cfg": r.config_hash,
+    }  # fmt: skip
 
 
 def test_batch_equals_incremental_and_restart(bars) -> None:  # type: ignore[no-untyped-def]
@@ -52,19 +54,51 @@ def test_batch_equals_incremental_and_restart(bars) -> None:  # type: ignore[no-
         )
 
 
-def test_all_documented_outputs_exist_and_not_ready_engine_stays_hidden(bars) -> None:  # type: ignore[no-untyped-def]
-    from nifty.engines.base import EngineNotReady, get_engine, list_engines
+def test_random_cuts_and_json_roundtrip_with_sub_bars(bars) -> None:  # type: ignore[no-untyped-def]
+    import random
 
-    r = run_batch("pine.balu_zone", {}, bars[:2000], "5m", **KW)
+    batch = run_batch("pine.balu_zone", {}, bars, "5m", **KW)
+    rnd = random.Random(11)
+    for cut in sorted(
+        rnd.sample(range(1, len(batch.plots) - 1), 5)
+    ):  # the runner supplies 1m sub-bars
+        assert view(run_with_restart("pine.balu_zone", {}, bars, "5m", cut=cut, **KW)) == view(
+            batch
+        ), cut
+
+
+def test_all_documented_outputs_exist_and_the_engine_is_ready(bars) -> None:  # type: ignore[no-untyped-def]
+    from nifty.engines.base import get_engine, list_engines
+
+    r = run_batch("pine.balu_zone", {}, bars[:2500], "5m", **KW)
     names = set(r.plots[-1][1])
     assert {"atr", "golden", "gold_state", "regime_idx", "cvd", "moving_line", "flow_z", "flow_state",
             "day_len", "or_high", "or_low", "pool_size", "next_up", "next_dn", "next_up_proj",
             "next_dn_proj", "loc_idx", "tap_demand_bot", "tap_supply_top", "zones_up", "zones_dn",
             "zones_size", "fp_n", "fp_tot", "fp_imb", "fp_valid", "press_buy", "press_sell",
-            "sweep_d_conf", "sweep_s_conf"} <= names  # fmt: skip
-    assert "pine.balu_zone" not in {e["id"] for e in list_engines()}
-    with pytest.raises(EngineNotReady):
-        get_engine("pine.balu_zone")
+            "sweep_d_conf", "sweep_s_conf", "state_id", "n_up", "n_dn", "n_timeout", "n_both", "n_cut",
+            "n_pending", "sample_days"} <= names  # fmt: skip
+    assert r.panel is not None and len(r.panel["rows"]) == 13
+    assert (
+        "pine.balu_zone" in {e["id"] for e in list_engines()} and get_engine("pine.balu_zone").ready
+    )
+
+
+def test_snapshot_schema_version_is_checked() -> None:
+    from nifty.engines.balu.engine import SNAPSHOT_VERSION
+    from tests.unit.engines.balu.helpers import Harness
+
+    h = Harness()
+    snap = h.engine.snapshot()
+    assert snap["v"] == SNAPSHOT_VERSION == 1 and set(snap["slots"]) >= {
+        "core",
+        "pool",
+        "zones",
+        "path",
+        "sweeps",
+    }
+    with pytest.raises(ValueError, match="version"):
+        h.engine.restore({**snap, "v": 99})
 
 
 def test_ui_params_do_not_change_config_hash() -> None:

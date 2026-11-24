@@ -22,7 +22,7 @@ export function plotLayers(engine: Engine, plots: Plots, barSec: number, ui: Rec
   const overrides: Record<string, string> = {};
   for (const [k, v] of Object.entries(ui)) if (k.startsWith("color_") && typeof v === "string") overrides[k.slice(6)] = v;
   return (engine.plots ?? [])
-    .filter((s) => plots.series[s.name])
+    .filter((s) => plots.series[s.name] && s.role !== "hidden") // "hidden" = data-window only
     .map((s) => ({
       key: `${engine.id}:${s.name}`,
       name: s.name,

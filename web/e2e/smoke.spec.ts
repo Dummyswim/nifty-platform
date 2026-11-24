@@ -25,7 +25,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   // NVS is on by default: its 15 entry markers draw even on the 1m chart (outputs are time-anchored)
   await expect(page.getByTestId("status-pine.nvs_scalper")).toHaveText("ready", { timeout: 45_000 });
   await expect(chart).toHaveAttribute("data-entry-markers", "15");
-  await expect(page.getByTestId("engine-panel")).toContainText("VWAP");
+  await expect(page.getByTestId("engine-panel").filter({ hasText: "pine.nvs_scalper" })).toContainText("VWAP");
   const nOverlays = Number(await chart.getAttribute("data-overlays"));
   expect(nOverlays).toBeGreaterThan(15);
   await expect(page.getByTestId("legend-c")).toHaveText(/^\d+\.\d\d$/);
@@ -84,6 +84,23 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect.poll(async () => Number(await chart.getAttribute("data-overlays"))).toBeGreaterThan(nOverlays); // audit lines
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(100);
   if (SHOT) await page.screenshot({ path: SHOT.replace(/\.png$/, "-audit.png") });
+
+  // Balu: toggle it on, zones/rails/markers load and its 13-row panel card renders
+  const plotsBefore = Number(await chart.getAttribute("data-plots"));
+  const overlaysBefore = Number(await chart.getAttribute("data-overlays"));
+  const toggle = page.getByLabel("Toggle pine.balu_zone");
+  await toggle.click(); // the switch flips once the saved preference round-trips
+  await expect(toggle).toBeChecked();
+  await expect(page.getByTestId("status-pine.balu_zone")).toHaveText("ready", { timeout: 60_000 });
+  await expect.poll(async () => Number(await chart.getAttribute("data-plots"))).toBeGreaterThan(plotsBefore);
+  await expect.poll(async () => Number(await chart.getAttribute("data-overlays"))).toBeGreaterThan(overlaysBefore + 100);
+  const balu = page.getByTestId("engine-panel").filter({ hasText: "pine.balu_zone" });
+  await expect(balu.locator(".prow")).toHaveCount(13);
+  await expect(balu).toContainText("Not established");
+  if (SHOT) await page.screenshot({ path: SHOT.replace(/\.png$/, "-balu.png") });
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(balu).toHaveCount(0);
 
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();

@@ -13,7 +13,8 @@ import { type Filters, NO_FILTER, type SortKey, filterTrades, reasonsOf, sortTra
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function NewRun({ engines, symbol, onDone }: { engines: EngineOut[]; symbol: string; onDone: (id: string) => void }) {
-  const [engineId, setEngineId] = useState(engines[0]?.id ?? "");
+  // Balu is an indicator (no trades): default to the strategy engine
+  const [engineId, setEngineId] = useState((engines.find((e) => e.id === "pine.nvs_scalper") ?? engines[0])?.id ?? "");
   const engine = engines.find((e) => e.id === engineId);
   const fields = useMemo(() => (engine ? fieldsOf(engine).filter((f) => !f.ui) : []), [engine]);
   const [vals, setVals] = useState<Values["params"]>({});

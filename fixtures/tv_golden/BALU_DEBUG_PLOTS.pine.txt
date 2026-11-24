@@ -27,3 +27,13 @@ plot(fpImbNow,              "dbg_fpImbNow",  display = display.data_window)
 plot(fpTot,                 "dbg_fpTot",     display = display.data_window)
 plot(fpN,                   "dbg_fpN",       display = display.data_window)
 plot(zones.size(),          "dbg_zonesSize", display = display.data_window)
+
+// ---- C11: path history ----------------------------------------------------------------------
+plot(stateId,                       "dbg_stateId",    display = display.data_window)
+plot(nUp,                           "dbg_nUp",        display = display.data_window)
+plot(nDn,                           "dbg_nDn",        display = display.data_window)
+plot(nTimeout,                      "dbg_nTimeout",   display = display.data_window)
+plot(nBoth,                         "dbg_nBoth",      display = display.data_window)
+plot(nCut,                          "dbg_nCut",       display = display.data_window)
+plot(nPending,                      "dbg_nPending",   display = display.data_window)
+plot(sampleDays.get(statsState),    "dbg_sampleDays", display = display.data_window)

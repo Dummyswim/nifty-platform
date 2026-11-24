@@ -1,7 +1,7 @@
-"""Engine `pine.balu_zone` (v1, in progress): port of reference/pine/Balu_Zone_Scalper_v2.pine.
+"""Engine `pine.balu_zone` v1: port of reference/pine/Balu_Zone_Scalper_v2.pine.
 
-C09 implements steps 1-6 of the bar order (docs/pine/BALU-3.md); C10/C11 register the rest through
-`steps.STEPS` without editing this file."""
+The 15 steps of the bar order (docs/pine/BALU-3.md) are registered through `steps.STEPS` by the
+modules in `steps.STEP_MODULES`; this file only runs them, snapshots their slots and builds the panel."""
 
 from importlib import import_module
 from typing import Any
@@ -14,6 +14,16 @@ from nifty.engines.context import EngineContext
 
 for _m in steps.STEP_MODULES:
     import_module(_m)
+
+
+SNAPSHOT_VERSION = 1
+# Only these plots are drawn on the chart; every other series is data-window only (role "hidden"),
+# which keeps the chart to the overlay pane and still exports them for parity.
+VISIBLE_PLOTS = {"golden", "moving_line", "or_high", "or_low"}
+steps.PLOT_SPECS[:] = [
+    s if s.name in VISIBLE_PLOTS else s.model_copy(update={"role": "hidden"})
+    for s in steps.PLOT_SPECS
+]
 
 
 class BaluZoneEngine:
@@ -46,14 +56,17 @@ class BaluZoneEngine:
         return out
 
     def snapshot(self) -> dict[str, Any]:
-        return {n: s.state() for n, s in self.slots.items()}
+        """JSON-safe (NaN as None). Schema version SNAPSHOT_VERSION; one entry per registered slot."""
+        return {"v": SNAPSHOT_VERSION, "slots": {n: s.state() for n, s in self.slots.items()}}
 
     def restore(self, snap: dict[str, Any]) -> None:
+        if snap.get("v") != SNAPSHOT_VERSION:
+            raise ValueError(f"unsupported balu snapshot version {snap.get('v')!r}")
         for n, s in self.slots.items():
-            s.load(snap[n])
+            s.load(snap["slots"][n])
 
     def panel(self) -> dict[str, Any] | None:
-        return None  # BALU-3
+        return steps.PANEL[0](self) if steps.PANEL else None
 
 
-register_engine(BaluZoneEngine, ready=False)
+register_engine(BaluZoneEngine, ready=True)

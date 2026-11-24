@@ -55,14 +55,15 @@ def main() -> int:
     )
     bars = synthetic_bars(cal)
     print(f"SYNTHETIC data (oracle sessions tiled onto weekdays): {len(bars)} 1m bars")
-    for name, fn in (("batch", run_batch), ("incremental", run_incremental)):
-        t0 = time.perf_counter()
-        r = fn("pine.nvs_scalper", {}, bars, "5m", instrument=ins, calendar=cal)
-        dt = time.perf_counter() - t0
-        print(
-            f"{name:<12} {len(bars) / dt:>10,.0f} 1m bars/s · {len(r.bars) / dt:>8,.0f} chart bars/s"
-            f" · {dt:.1f}s · trades {len(r.trades)}"
-        )
+    for eid in ("pine.nvs_scalper", "pine.balu_zone"):
+        for name, fn in (("batch", run_batch), ("incremental", run_incremental)):
+            t0 = time.perf_counter()
+            r = fn(eid, {}, bars, "5m", instrument=ins, calendar=cal)
+            dt = time.perf_counter() - t0
+            print(
+                f"{eid:<17} {name:<12} {len(bars) / dt:>10,.0f} 1m bars/s · "
+                f"{len(r.bars) / dt:>8,.0f} chart bars/s · {dt:.1f}s · trades {len(r.trades)}"
+            )
     print(f"peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MB")
     return 0
 

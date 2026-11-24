@@ -57,9 +57,9 @@ def load_token(conn: Connection, secret: str, now: datetime | None = None) -> st
         return None
 
 
-def client_for(conn: Connection, settings: Settings) -> KiteClient:
+def client_for(conn: Connection, settings: Settings, now: datetime | None = None) -> KiteClient:
     """Authenticated client from the stored token; AUTH_EXPIRED when there is none."""
-    token = load_token(conn, settings.app_secret_key)
+    token = load_token(conn, settings.app_secret_key, now)
     if not settings.kite_api_key:
         raise ProviderError(ErrorCode.AUTH_EXPIRED, "KITE_API_KEY is not set in .env")
     if token is None:
@@ -94,7 +94,7 @@ def kite_status(
         return out
     if row[2] is None or now - row[2] >= STATUS_TTL:
         try:
-            client = client_for(conn, settings)
+            client = client_for(conn, settings, now)
             client.profile()
             err = None
         except ProviderError as e:

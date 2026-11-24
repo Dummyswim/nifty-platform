@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C11
-last_update: 2026-11-23 (C10)
+next_chunk: C12
+last_update: 2026-11-24 (C11)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (live verified 2026-11-23: login, profile, master, 1m candles)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -18,7 +18,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C08 | done | packets, WS client, bar builder, collector, live runner, /ws/v1/stream, demo (live Kite untested) |
 | C09 | done | Balu 1: params, session, level pool, golden, moving line, divergence (ready=False) |
 | C10 | done | Balu 2: zones, key levels, location, pressure (+EARLY), sweeps (ready=False) |
-| C11 | pending | Balu 3: path history, panel, alerts |
+| C11 | done | Balu 3: path history, 13-row panel, alerts, snapshot/restore; `pine.balu_zone` ready=True |
 | C12 | pending | options dashboard, CE/PE paper mapping |
 | C13 | pending | research engine: features, baselines, armed, outcomes |
 | C14 | pending | research runs, statistics, verdict, UI |
@@ -73,11 +73,14 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - C09 edits made for C10 (all in `steps.py`/`engine.py`): `steps.PROVISIONAL` + `@provisional` decorator, `BaluZoneEngine.on_provisional` now runs the registered hooks (merging plots/events), and `STEP_MODULES` extended. Nothing else in C09 modules changed.
 - Balu overlays: zones `kind=zone`, id `z<seq>` (seq from `ZoneBook.next_seq`, persisted), ver 0 on creation (meta.status active|projected, tier = k+1, top/bot/center, style.role demand|supply, style.dashed = projected, text Demand|Supply [(proj)]), mitigation with keep_mitigated => next ver with status `mitigated`, `t1` = that bar's end; a drop => `deleted=true` with ver+1. Key-level rails `kind=hline` id `kl:<PDH|PDL|PDC|PP|R1|S1|ORH|ORL>:<session date>`, style {role: info, dash: solid|dotted|dashed}, cleared by `deleted` vers on the next session's first bar. Markers: `pb:<bar start>` (circle below) / `ps:` (circle above) for pressure, `swd:` / `sws:` (xcross below/above, on the CONFIRMING bar); marker `style.shape/pos` are not rendered by the web yet (web draws role-based arrows).
 - Balu events (type `alert`, payload `{kind, name, zone_center, imb}`): kinds `press_buy press_sell sweep_demand sweep_supply`; provisional (from `on_provisional`) `press_buy_early press_sell_early`, never touching state (snapshot equality tested). Pressure needs 1m sub-bars; `fp_ltf` must be one of 1,3,5,10,15,30,60 minutes, equal/higher than the chart => suppressed, non-divisor => `ConfigError`.
+- Balu (C11): `path.py` (step 13: `PathHistory` pure rules + `stats()`, `state_id`, `session_ends`, slot `path`), `panel.py` (step 14: `rows(raw)` 13 rows `{label,value,role}`, slot `panel` holds the raw values; roles bull|bear|neutral|supply|demand; `@panel_builder`), `alerts.py` (step 15, slot `alerts` = previous regime). `steps.PANEL` + `@panel_builder` added; `BaluZoneEngine.panel()` uses it. Engine `pine.balu_zone` v1 is `ready=True` (in the UI indicator list, off by default; NVS stays the default). Snapshot schema: `{"v": 1, "slots": {core, pool, swings, gold, flow, zones, rails, pressure, sweeps, path, alerts, panel}}` (`SNAPSHOT_VERSION`, restore rejects other versions). Plots drawn on the chart: golden, moving_line, or_high, or_low only; every other plot has `role="hidden"` (data-window / parity only; the web skips hidden plots). Doc `docs/engines/balu.md`; debug plots `fixtures/tv_golden/BALU_DEBUG_PLOTS.pine.txt` (C09+C10+C11 blocks).
+- Bench (`make bench`, 100,099 synthetic 1m bars, 5m): NVS batch 94k 1m bars/s (18.8k chart bars/s), incremental 50k (9.9k); Balu batch 27.5k 1m bars/s (5,507 chart bars/s), incremental 21k (4,230 chart bars/s); peak RSS 379 MB. Target >=3,000 chart bars/s met, no profiling needed.
 - Make targets implemented: up down ps logs check test migrate db-q bars parity bench e2e kite-smoke live demo start init-env hash-password api-types. `bars` wired (C01). `db-q` falls back to local psql when no compose db is running.
 - Ports: api 8000, web 8080, db 5432 / redis 6379 (127.0.0.1 only). Images: timescale/timescaledb:2.17.2-pg16, redis:7.4.1-alpine, python:3.14-slim, node:22-alpine, nginx:1.27-alpine (UNVERIFIED pulls)
 - Local py: `Makefile.local` (gitignored) PY/PIP = `/home/balaj/projects/practicalenv/bin/{python,pip}`
 
 ## Deviations (spec → actual, why)
+- C11: no Pine/map mismatch found. The "BUY?"/"SELL?" panel text exists in `panel.rows` (provisional flag) but `panel()` only reflects confirmed bars, so it is never shown today. Alert events keep type `alert` + `payload.kind`; `divergence` events (C09) are unchanged. Ruff E501 is ignored under `src/nifty/engines/balu/**` (Pine-port tables). Web: Backtests new-run form defaults to `pine.nvs_scalper` (Balu produces no trades); EnginePanel CSS knows supply/demand roles. Fixed `kite_status` to validate with its injected `now` (it used the wall clock, which broke a test once the real time passed the fixture token's expiry).
 - C10: Pine/BALU-2 agree, no mismatch found. `zones_up`/`zones_dn` are defined as the number of live supply zones above / demand zones below price (BALU-2 lists the names only). Extra plot `zones_size` carries `zones.size()` for the debug plot. Alert events use type `alert` with `payload.kind` (the BALU docs name the alerts but not the event type). `SERIES["pine.balu_zone"]` extended with the C10 dbg_* plots.
 - C09: timeframes `2h` and `4h` added to `Timeframe`/`TF_MINUTES` (Balu's Auto HTF for charts of 16-60 min is 4H, 2H is an input option). Extra hidden plots `gold_val`, `moving_line_raw`, `flow_ready` (needed to compare dbg_goldVal/dbg_movingLine/dbg_flowReady). No pinekit additions (all primitives existed). No Pine/map mismatch found. Engine `warmup_bars` is a class constant (105 = 100 + default flowSlopeLen). `proxy_volume_instrument` is a Params field but the proxy volume itself comes from the runner's `ctx.proxy_volume`. The restart property test found and fixed a NaN->None restore bug in `SessionState.load`.
 - C08: restart restores engines by replaying stored 1m bars (last 5 sessions), not from `snapshot()` (simpler, identical output, tested); live runs are keyed `source_id=live:<instrument_id>` (the run key has no instrument). The collector status travels through a DB row (not Redis) so the API needs no Redis. Packets assume big-endian (undocumented). Provisional bars are relayed only for 1m charts. WS messages are hand-typed in `web/src/live/messages.ts` (not OpenAPI). `received_time_basis` flag unused: index `full` packets carry an exchange timestamp. NOT tested here: live Kite stream, `backfill_gap`/`reconcile_day` against real Kite (their pure parts and the pipeline are tested offline). Demo hold-after-replay keeps `connected=true` on purpose.
@@ -109,6 +112,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 
 ## Open issues / ASKs
+- Balu golden export: see the C11 reply (RUNBOOK §Golden). `golden_tv` stays `none` until you confirm both files exist (`fixtures/tv_golden/nvs/*`, `fixtures/tv_golden/balu/ohlc_plots.csv`).
 - Balu golden (fixtures/tv_golden/balu/ohlc_plots.csv) is exported once after C11 (RUNBOOK §Golden, `BALU_DEBUG_PLOTS.pine.txt`); until then the Tier-A test skips with `golden missing`.
 - C08 live Kite is user-only (market hours): Connect Kite, then `make live` (needs the API/worker running as in C07), open the app, Chart -> Live on NIFTY 50, and check Settings/collector status; paste anything odd (packet endianness and the WS entitlement are unverified).
 - Kite live verified 2026-11-23 (make kite-smoke PASS: profile, 4541 NIFTY master rows, 375 1m candles; minute range of 61 days accepted, so the real day limit is above 60 and still unknown; WebSocket entitlement untested until C08). Dev DB has the instrument master and a token that expires 06:00 IST.

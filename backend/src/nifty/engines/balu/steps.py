@@ -68,6 +68,7 @@ class BarFrame:
 
 # on_provisional hooks (C10 pressure): (engine, forming bar) -> EngineOutput; read-only
 PROVISIONAL: list[Callable[[Any, Bar], EngineOutput]] = []
+PANEL: list[Callable[[Any], dict[str, Any] | None]] = []  # panel builders (C11)
 PLOT_SPECS: list[PlotSpec] = []  # modules append their PlotSpecs (the engine exposes this list)
 Step = Callable[["BaluZoneEngine", BarFrame], None]
 STEPS: dict[int, Step] = {}
@@ -83,6 +84,9 @@ STEP_MODULES: list[str] = [
     "nifty.engines.balu.location",
     "nifty.engines.balu.pressure",
     "nifty.engines.balu.sweeps",
+    "nifty.engines.balu.path",  # C11: steps 13-15
+    "nifty.engines.balu.panel",
+    "nifty.engines.balu.alerts",
 ]
 
 
@@ -101,6 +105,13 @@ def step(n: int) -> Callable[[Step], Step]:
 
 def provisional(fn: Callable[[Any, Bar], EngineOutput]) -> Callable[[Any, Bar], EngineOutput]:
     PROVISIONAL.append(fn)
+    return fn
+
+
+def panel_builder(
+    fn: Callable[[Any], dict[str, Any] | None],
+) -> Callable[[Any], dict[str, Any] | None]:
+    PANEL.append(fn)
     return fn
 
 
