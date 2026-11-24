@@ -27,6 +27,11 @@ function NewRun({ engines, symbol, onDone }: { engines: EngineOut[]; symbol: str
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [showParams, setShowParams] = useState(false);
+  const [opt, setOpt] = useState(false);
+  const [strikeType, setStrikeType] = useState("ATM");
+  const [expiryKind, setExpiryKind] = useState("current weekly");
+  const [lots, setLots] = useState("1");
+  const [costInr, setCostInr] = useState("0");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +43,7 @@ function NewRun({ engines, symbol, onDone }: { engines: EngineOut[]; symbol: str
       const body = {
         engine_id: engine.id, symbol, timeframe: tf || engine.default_timeframe, params, mode,
         qty: Number(qty), cost_pts: Number(cost), ...(from ? { from_date: from } : {}), ...(to ? { to_date: to } : {}),
+        ...(opt ? { option_policy: { strike_type: strikeType, expiry_kind: expiryKind, lots: Number(lots), cost_inr: Number(costInr) } } : {}),
       };
       const sub = await api<SubmitOut>("/backtests", { body });
       for (let i = 0; i < 240; i++) {
@@ -76,6 +82,15 @@ function NewRun({ engines, symbol, onDone }: { engines: EngineOut[]; symbol: str
       </label>
       <label>Qty <input type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} /></label>
       <label>cost_pts <input type="number" min="0" step="any" value={cost} onChange={(e) => setCost(e.target.value)} /></label>
+      <label className="chk"><input type="checkbox" checked={opt} onChange={(e) => setOpt(e.target.checked)} aria-label="Map to options" /> Map to options (CE/PE paper)</label>
+      {opt && (
+        <>
+          <label>Strike type <select value={strikeType} onChange={(e) => setStrikeType(e.target.value)}>{["Deep ITM", "ITM", "ATM", "OTM", "Deep OTM"].map((x) => <option key={x}>{x}</option>)}</select></label>
+          <label>Expiry <select value={expiryKind} onChange={(e) => setExpiryKind(e.target.value)}>{["current weekly", "next weekly", "monthly"].map((x) => <option key={x}>{x}</option>)}</select></label>
+          <label>Lots <input type="number" min="1" step="1" value={lots} onChange={(e) => setLots(e.target.value)} /></label>
+          <label>cost_inr <input type="number" min="0" step="any" value={costInr} onChange={(e) => setCostInr(e.target.value)} /></label>
+        </>
+      )}
       <button type="button" className="ghost" onClick={() => setShowParams(!showParams)}>Params</button>
       <button type="submit" disabled={busy || !engine} data-testid="run-backtest">Run backtest</button>
       {msg && <span className={msg.startsWith("failed") ? "error" : "muted"} role="status">{msg}</span>}
@@ -101,6 +116,7 @@ function Detail({ id }: { id: string }) {
   const [dir, setDir] = useState<1 | -1>(1);
   const [audit, setAudit] = useState<string | null>(null);
   const rows = useMemo(() => sortTrades(filterTrades(trades.data ?? [], f), key, dir), [trades.data, f, key, dir]);
+  const hasOpt = (trades.data ?? []).some((t) => t.contract_id);
   if (!bt.data) return <p className="muted">Loading…</p>;
   const th = (k: SortKey, label: string) => (
     <th onClick={() => (k === key ? setDir(dir === 1 ? -1 : 1) : (setKey(k), setDir(1)))} aria-sort={k === key ? (dir === 1 ? "ascending" : "descending") : "none"}>
@@ -129,12 +145,18 @@ function Detail({ id }: { id: string }) {
         ))}
       </div>
       <table className="trades" data-testid="trades">
-        <thead><tr>{th("side", "Side")}{th("entry_time", "Entry (IST)")}<th>Entry px</th>{th("exit_time", "Exit (IST)")}<th>Exit px</th>{th("exit_reason", "Reason")}{th("net_pts", "Net pts")}{th("r_multiple", "R")}{th("bars_held", "Bars")}</tr></thead>
+        <thead><tr>{th("side", "Side")}{th("entry_time", "Entry (IST)")}<th>Entry px</th>{th("exit_time", "Exit (IST)")}<th>Exit px</th>{th("exit_reason", "Reason")}{th("net_pts", "Net pts")}{th("r_multiple", "R")}{th("bars_held", "Bars")}{hasOpt && <><th>Contract</th><th>Entry prem</th><th>Exit prem</th><th>P&L ₹</th></>}</tr></thead>
         <tbody>
           {rows.map((t) => (
             <tr key={t.trade_id} onClick={() => setAudit(t.trade_id)} className={t.net_pts > 0 ? "win" : "loss"} data-testid="trade-row" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setAudit(t.trade_id)}>
               <td>{t.side}</td><td>{ist(t.entry_time)}</td><td>{t.entry_px.toFixed(2)}</td><td>{ist(t.exit_time)}</td><td>{t.exit_px.toFixed(2)}</td>
               <td>{t.exit_reason}</td><td>{t.net_pts.toFixed(2)}</td><td>{t.r_multiple?.toFixed(2) ?? "n/a"}</td><td>{t.bars_held}</td>
+              {hasOpt && (
+                <>
+                  <td>{t.contract_id ?? "no quote"}</td><td>{t.entry_prem?.toFixed(2) ?? "—"}</td><td>{t.exit_prem?.toFixed(2) ?? "—"}</td>
+                  <td>{t.pnl_inr != null ? `${t.pnl_inr.toFixed(0)}${t.synthetic ? " (synth. exit)" : ""}` : "—"}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

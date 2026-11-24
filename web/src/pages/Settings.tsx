@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { JobOut, KiteStatusOut, LoginUrlOut, SubmitOut } from "../api/schemas";
 
@@ -77,12 +77,66 @@ function KiteSection() {
   );
 }
 
+const OPT_DEFAULTS = { r: "", window: "5", stale: "60", cost: "0", offsets: { "Deep ITM": "5", ITM: "2", ATM: "0", OTM: "2", "Deep OTM": "5" } as Record<string, string> };
+
+function OptionsSection() {
+  const qc = useQueryClient();
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
+  const [f, setF] = useState(OPT_DEFAULTS);
+  const [msg, setMsg] = useState("");
+  const loaded = prefs.data;
+  useEffect(() => {
+    if (!loaded) return;
+    const r = loaded["options.r"];
+    const off = (loaded["options.strike_offsets"] ?? {}) as Record<string, number>;
+    setF({
+      r: typeof r === "number" ? String(r * 100) : "",
+      window: String(loaded["options.window_steps"] ?? OPT_DEFAULTS.window),
+      stale: String(loaded["options.max_stale_s"] ?? OPT_DEFAULTS.stale),
+      cost: String(loaded["options.cost_inr"] ?? OPT_DEFAULTS.cost),
+      offsets: { ...OPT_DEFAULTS.offsets, ...Object.fromEntries(Object.entries(off).map(([k, v]) => [k, String(v)])) },
+    });
+  }, [loaded]);
+  const put = (key: string, value: unknown) => api(`/prefs/${key}`, { method: "PUT", body: { value } });
+  const save = async () => {
+    try {
+      await Promise.all([
+        put("options.r", f.r.trim() === "" ? null : Number(f.r) / 100), // no invented default: empty = Greeks n/a
+        put("options.window_steps", Math.max(1, Math.round(Number(f.window)))),
+        put("options.max_stale_s", Math.max(1, Number(f.stale))),
+        put("options.cost_inr", Math.max(0, Number(f.cost))),
+        put("options.strike_offsets", Object.fromEntries(Object.entries(f.offsets).map(([k, v]) => [k, Math.max(0, Math.round(Number(v)))]))),
+      ]);
+      void qc.invalidateQueries({ queryKey: ["prefs"] });
+      setMsg("saved");
+    } catch (e) {
+      setMsg(`failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  return (
+    <section data-testid="options-settings">
+      <h3>Options</h3>
+      <div className="form wide">
+        <label className="f"><span>Risk-free rate r (% p.a.; empty = Greeks n/a)</span><input aria-label="Risk-free rate" value={f.r} onChange={(e) => setF({ ...f, r: e.target.value })} /></label>
+        <label className="f"><span>Recording window (strikes each side of ATM)</span><input aria-label="Window steps" value={f.window} onChange={(e) => setF({ ...f, window: e.target.value })} /></label>
+        <label className="f"><span>Max quote staleness for paper trades (s)</span><input aria-label="Max staleness" value={f.stale} onChange={(e) => setF({ ...f, stale: e.target.value })} /></label>
+        <label className="f"><span>Paper trade cost (₹ per round trip)</span><input aria-label="Cost INR" value={f.cost} onChange={(e) => setF({ ...f, cost: e.target.value })} /></label>
+        {Object.entries(f.offsets).map(([k, v]) => (
+          <label className="f" key={k}><span>{k} (strike steps from ATM)</span><input aria-label={`Offset ${k}`} value={v} onChange={(e) => setF({ ...f, offsets: { ...f.offsets, [k]: e.target.value } })} /></label>
+        ))}
+      </div>
+      <div className="row gap"><button onClick={() => void save()}>Save options settings</button>{msg && <span className={msg.startsWith("failed") ? "error small" : "muted small"} role="status">{msg}</span>}</div>
+    </section>
+  );
+}
+
 export function Settings() {
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
   return (
     <div className="panel">
       <h2>Settings</h2>
       <KiteSection />
+      <OptionsSection />
       <section>
         <h3>Preferences</h3>
         {prefs.isLoading ? <p className="muted">Loading…</p> : <pre data-testid="prefs">{JSON.stringify(prefs.data ?? {}, null, 2)}</pre>}

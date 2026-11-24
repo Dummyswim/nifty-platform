@@ -79,6 +79,40 @@ def _apply_mode(r: RunResult, mode: str, qty: float, cost_pts: float) -> list[Tr
     return out
 
 
+def map_option_trades(
+    conn: Connection, trades: list[TradeRecord], policy: dict[str, Any]
+) -> tuple[list[TradeRecord], dict[str, Any]]:
+    """CE/PE paper mapping on recorded quotes only (D12). Unmapped trades stay index-only and are
+    counted (`no_quote`, `no_contract`)."""
+    from nifty.db.chart import get_prefs
+    from nifty.db.instruments import option_instruments
+    from nifty.db.options import DbQuoteBook
+    from nifty.options.chain import DEFAULT_OFFSETS
+    from nifty.options.paper import Policy, map_trade
+
+    prefs = get_prefs(conn)
+    saved = prefs.get("options.strike_offsets") or {}
+    offsets = {**DEFAULT_OFFSETS, **{k: int(v) for k, v in saved.items() if k in DEFAULT_OFFSETS}}
+    try:
+        pol = Policy(**policy)
+    except TypeError as e:
+        raise BacktestError(f"bad option_policy: {e}") from e
+    options, book = option_instruments(conn), DbQuoteBook(conn)
+    out: list[TradeRecord] = []
+    counts = {"no_quote": 0, "no_contract": 0}
+    for t in trades:
+        m, why = map_trade(t, options, book, pol, offsets)
+        out.append(m or t)
+        if why:
+            counts[why] += 1
+    mapped = [t for t in out if t.contract_id]
+    return out, {
+        "policy": policy, "n_mapped": len(mapped), "no_quote": counts["no_quote"],
+        "no_contract": counts["no_contract"], "cost_inr": pol.cost_inr,
+        "total_pnl_inr": sum(t.pnl_inr or 0.0 for t in mapped),
+    }  # fmt: skip
+
+
 def run_backtest(conn: Connection, p: dict[str, Any]) -> str:
     """Returns backtest_id. Same engine/params/snapshot/timeframe/mode/qty/cost => same id."""
     load_builtin_engines()
@@ -99,10 +133,19 @@ def run_backtest(conn: Connection, p: dict[str, Any]) -> str:
         source_id=snapshot_id,
     )  # fmt: skip
     trades = _apply_mode(r, mode, qty, cost)
+    policy = p.get("option_policy")
+    option_summary: dict[str, Any] | None = None
+    if policy:
+        trades, option_summary = map_option_trades(conn, trades, policy)
     run_id, _ = persist_run(conn, r)
-    bt_id = "bt_" + hashlib.sha256(f"{run_key(r)}|{mode}|{qty}|{cost}".encode()).hexdigest()[:16]
+    pol_key = json.dumps(policy, sort_keys=True) if policy else ""
+    bt_id = (
+        "bt_"
+        + hashlib.sha256(f"{run_key(r)}|{mode}|{qty}|{cost}|{pol_key}".encode()).hexdigest()[:16]
+    )
     sessions = {cal.session_date(b.bar_start_utc) for b in bars}
     summary = compute_metrics(trades, cal.session_date, sessions)
+    summary["option"] = option_summary
     got = conn.execute(
         text(
             "INSERT INTO backtests (backtest_id, run_id, engine_id, instrument_id, snapshot_id, "

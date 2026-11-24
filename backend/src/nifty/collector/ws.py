@@ -47,6 +47,7 @@ class KiteStream:
     ) -> None:
         self._url = f"{base_url}?api_key={api_key}&access_token={access_token}"
         self._parts = chunks(tokens)
+        self._live: dict[int, Any] = {}  # open connection per part (for dynamic subscription)
         self.on_frame, self.on_status, self.mode = on_frame, on_status, mode
         self._sleep, self.max_backoff = sleep, max_backoff
         self.reconnects = 0
@@ -66,7 +67,28 @@ class KiteStream:
         if asyncio.iscoroutine(r):
             await r
 
-    async def _one(self, tokens: list[int], stop: asyncio.Event) -> None:
+    async def update(self, add: list[int], remove: list[int]) -> None:
+        """Subscribe/unsubscribe on the live connection (part 0); the stored set follows, so a
+        reconnect resubscribes the CURRENT window. Keeps the 3000-per-connection limit."""
+        part = self._parts[0]
+        add = [t for t in add if t not in part]
+        if len(part) - len(remove) + len(add) > MAX_PER_CONN:
+            raise ProviderError(
+                ErrorCode.BAD_DATA, f"more than {MAX_PER_CONN} instruments on one connection"
+            )
+        ws = self._live.get(0)
+        for t in remove:
+            if t in part:
+                part.remove(t)
+        part.extend(add)
+        if ws is not None:
+            if remove:
+                await ws.send(json.dumps({"a": "unsubscribe", "v": remove}))
+            if add:
+                await ws.send(json.dumps({"a": "subscribe", "v": add}))
+                await ws.send(json.dumps({"a": "mode", "v": [self.mode, add]}))
+
+    async def _one(self, tokens: list[int], stop: asyncio.Event, idx: int = 0) -> None:
         backoff = 1.0
         while not stop.is_set() and not self.auth_expired:
             try:
@@ -74,6 +96,7 @@ class KiteStream:
                     await ws.send(json.dumps({"a": "subscribe", "v": tokens}))
                     await ws.send(json.dumps({"a": "mode", "v": [self.mode, tokens]}))
                     backoff = 1.0
+                    self._live[idx] = ws
                     await self._emit("connected")
                     async for msg in ws:
                         if stop.is_set():
@@ -95,6 +118,7 @@ class KiteStream:
                 await self._emit("disconnected", f"handshake status {e.response.status_code}")
             except (ConnectionClosed, WebSocketException, OSError, TimeoutError) as e:
                 await self._emit("disconnected", type(e).__name__)
+            self._live.pop(idx, None)
             if stop.is_set() or self.auth_expired:
                 return
             self.reconnects += 1
@@ -114,4 +138,4 @@ class KiteStream:
         )
 
     async def run(self, stop: asyncio.Event) -> None:
-        await asyncio.gather(*(self._one(p, stop) for p in self._parts))
+        await asyncio.gather(*(self._one(p, stop, i) for i, p in enumerate(self._parts)))

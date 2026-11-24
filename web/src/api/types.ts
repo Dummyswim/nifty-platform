@@ -524,6 +524,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/options/expiries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expiries */
+        get: operations["expiries_api_v1_options_expiries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/options/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chain */
+        get: operations["chain_api_v1_options_chain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/options/contract-bars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Contract Bars */
+        get: operations["contract_bars_api_v1_options_contract_bars_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -608,6 +659,7 @@ export interface components {
              * @default 0
              */
             cost_pts: number;
+            option_policy?: components["schemas"]["OptionPolicyIn"] | null;
         };
         /** BacktestOut */
         BacktestOut: {
@@ -691,6 +743,39 @@ export interface components {
              */
             next_cursor?: number | null;
         };
+        /** ChainOut */
+        ChainOut: {
+            /** Underlying */
+            underlying: string;
+            /**
+             * Expiry
+             * Format: date
+             */
+            expiry: string;
+            /** Spot */
+            spot?: number | null;
+            /** Spot Age S */
+            spot_age_s?: number | null;
+            /** Atm */
+            atm?: number | null;
+            /** Step */
+            step?: number | null;
+            /** R Set */
+            r_set: boolean;
+            /**
+             * Picks
+             * @description strike type -> {CE, PE} strike
+             */
+            picks: {
+                [key: string]: {
+                    [key: string]: number | null;
+                };
+            };
+            /** Rows */
+            rows: components["schemas"]["Row"][];
+            /** Note */
+            note?: string | null;
+        };
         /** CollectorStatusOut */
         CollectorStatusOut: {
             /**
@@ -732,6 +817,17 @@ export interface components {
             last_tick_age_s?: number | null;
             /** Updated Age S */
             updated_age_s?: number | null;
+        };
+        /** ContractBarsOut */
+        ContractBarsOut: {
+            /** Contract Id */
+            contract_id: string;
+            bars?: components["schemas"]["BarsOut"] | null;
+            oi: components["schemas"]["OiOut"];
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
         };
         /** DrawingData */
         DrawingData: {
@@ -855,6 +951,22 @@ export interface components {
             /** Events */
             events: components["schemas"]["EngineEvent"][];
         };
+        /** ExpiriesOut */
+        ExpiriesOut: {
+            /** Underlying */
+            underlying: string;
+            /**
+             * Kinds
+             * @description current weekly | next weekly | monthly; null = unavailable
+             */
+            kinds: {
+                [key: string]: string | null;
+            };
+            /** Expiries */
+            expiries: string[];
+            /** Step */
+            step?: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -954,6 +1066,64 @@ export interface components {
             low_n: boolean;
             /** Flags */
             flags: string[];
+            option?: components["schemas"]["OptionSummary"] | null;
+        };
+        /** OiOut */
+        OiOut: {
+            /** T */
+            t: number[];
+            /** V */
+            v: number[];
+        };
+        /** OptionPolicyIn */
+        OptionPolicyIn: {
+            /**
+             * Strike Type
+             * @default ATM
+             * @enum {string}
+             */
+            strike_type: "Deep ITM" | "ITM" | "ATM" | "OTM" | "Deep OTM";
+            /**
+             * Expiry Kind
+             * @default current weekly
+             * @enum {string}
+             */
+            expiry_kind: "current weekly" | "next weekly" | "monthly";
+            /**
+             * Lots
+             * @default 1
+             */
+            lots: number;
+            /**
+             * Cost Inr
+             * @default 0
+             */
+            cost_inr: number;
+            /**
+             * Max Stale S
+             * @default 60
+             */
+            max_stale_s: number;
+        };
+        /**
+         * OptionSummary
+         * @description CE/PE paper mapping totals (INR, never mixed with index points).
+         */
+        OptionSummary: {
+            /** N Mapped */
+            n_mapped: number;
+            /** No Quote */
+            no_quote: number;
+            /** No Contract */
+            no_contract: number;
+            /** Total Pnl Inr */
+            total_pnl_inr: number;
+            /** Cost Inr */
+            cost_inr: number;
+            /** Policy */
+            policy: {
+                [key: string]: unknown;
+            };
         };
         /**
          * OverlayElement
@@ -1067,6 +1237,15 @@ export interface components {
             /** Value */
             value: unknown;
         };
+        /** Row */
+        Row: {
+            /** Strike */
+            strike: number;
+            /** Atm */
+            atm: boolean;
+            ce?: components["schemas"]["Side"] | null;
+            pe?: components["schemas"]["Side"] | null;
+        };
         /** RunIn */
         RunIn: {
             /** Symbol */
@@ -1083,6 +1262,40 @@ export interface components {
             params?: {
                 [key: string]: unknown;
             };
+        };
+        /** Side */
+        Side: {
+            /** Contract Id */
+            contract_id: string;
+            /** Recorded */
+            recorded: boolean;
+            /** Last */
+            last?: number | null;
+            /** Bid */
+            bid?: number | null;
+            /** Ask */
+            ask?: number | null;
+            /** Age S */
+            age_s?: number | null;
+            /** Oi */
+            oi?: number | null;
+            /** Iv */
+            iv?: number | null;
+            /** Delta */
+            delta?: number | null;
+            /** Gamma */
+            gamma?: number | null;
+            /** Theta Day */
+            theta_day?: number | null;
+            /** Vega 1Pct */
+            vega_1pct?: number | null;
+            /**
+             * Greeks
+             * @default n/a
+             */
+            greeks: string;
+            /** Greeks Note */
+            greeks_note?: string | null;
         };
         /** SubmitOut */
         SubmitOut: {
@@ -2176,6 +2389,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    expiries_api_v1_options_expiries_get: {
+        parameters: {
+            query?: {
+                underlying?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpiriesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chain_api_v1_options_chain_get: {
+        parameters: {
+            query: {
+                expiry: string;
+                underlying?: string;
+                width?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    contract_bars_api_v1_options_contract_bars_get: {
+        parameters: {
+            query: {
+                contract_id: string;
+                tf?: "1m" | "3m" | "5m" | "10m" | "15m" | "30m" | "1h" | "1d";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractBarsOut"];
                 };
             };
             /** @description Validation Error */

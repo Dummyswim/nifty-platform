@@ -61,3 +61,15 @@ def get_instrument(conn: Connection, instrument_id: str) -> Instrument | None:
 def find_instrument(conn: Connection, symbol: str) -> Instrument | None:
     """By exact instrument_id (kite:NSE:NIFTY 50, demo:NIFTY 50) or by trading symbol."""
     return get_instrument(conn, symbol) or find_by_symbol(conn, symbol)
+
+
+def option_instruments(conn: Connection, underlying: str = "NIFTY") -> list[Instrument]:
+    """All listed CE/PE contracts of an underlying (from the stored master, D10)."""
+    rows = conn.execute(
+        text(
+            "SELECT *, provider_meta AS pm FROM instruments "
+            "WHERE instrument_type IN ('CE', 'PE') AND underlying = :u"
+        ),
+        {"u": underlying},
+    ).mappings()
+    return [Instrument(**{c: r[c] for c in _COLS}, provider_meta=r["pm"] or {}) for r in rows]

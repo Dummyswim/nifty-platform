@@ -15,6 +15,7 @@ from nifty.collector.ws import KiteStream
 from nifty.config import Settings, get_settings
 from nifty.contracts import Instrument
 from nifty.db.bars import read_bars, upsert_bars
+from nifty.db.instruments import option_instruments
 from nifty.db.kite import kite_instruments, load_token
 from nifty.db.session import get_engine
 from nifty.marketdata.base import ProviderError
@@ -22,6 +23,9 @@ from nifty.marketdata.kite.client import KiteClient
 from nifty.marketdata.kite.master import front_month_future, nifty_index
 from nifty.marketdata.kite.provider import KiteProvider
 from nifty.marketdata.validation import validate_bars
+from nifty.options.bs import effective_today
+from nifty.options.chain import EXPIRY_KINDS, expiry_kinds
+from nifty.options.window import WindowPlanner
 from nifty.timeutil import IST, Calendar, utcnow
 
 log = logging.getLogger("nifty.collector")
@@ -35,6 +39,21 @@ def enabled_engines(prefs: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if "pine.nvs_scalper" not in saved:
         ids.add("pine.nvs_scalper")
     return {i: dict((saved.get(i) or {}).get("params") or {}) for i in sorted(ids)}
+
+
+def make_planner(
+    prefs: dict[str, Any], options: list[Instrument], now: datetime
+) -> WindowPlanner | None:
+    """ATM +- `options.window_steps` (default 5), CE and PE, for the expiry kinds in
+    `options.record_kinds` (default all three); `options.record = false` turns recording off."""
+    if prefs.get("options.record", True) is False or not options:
+        return None
+    kinds = prefs.get("options.record_kinds") or list(EXPIRY_KINDS)
+    listed = expiry_kinds([o.expiry for o in options if o.expiry], effective_today(now))
+    exps = sorted({d for k in kinds if (d := listed.get(k)) is not None})
+    if not exps:
+        return None
+    return WindowPlanner(options, exps, int(prefs.get("options.window_steps", 5)))
 
 
 def backfill_gap(pipe: Pipeline, client: KiteClient, ins: Instrument, cal: Calendar) -> int:
@@ -78,6 +97,7 @@ async def run(settings: Settings | None = None) -> int:
     with db.connect() as c:
         token = load_token(c, s.app_secret_key)
         ins = kite_instruments(c)
+        option_list = option_instruments(c)
         prefs = {
             r[0]: r[1] for r in c.execute(text("SELECT key, value FROM prefs WHERE user_id = 1"))
         }
@@ -96,9 +116,27 @@ async def run(settings: Settings | None = None) -> int:
         pipe.add_feed(fut)  # front-month future: proxy volume for the index (D10/D20)
         tokens[fut.provider_token] = fut.instrument_id
     client = KiteClient(s.kite_api_key, s.kite_api_secret, token)
+    planner = make_planner(prefs, option_list, utcnow())
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+
+    async def apply_window(add: list[Instrument], remove: list[Instrument]) -> None:
+        for o in add:
+            if o.instrument_id not in pipe.feeds and o.provider_token is not None:
+                pipe.add_feed(o)  # option 1m bars from ticks; no engines
+            if o.provider_token is not None:
+                tokens[o.provider_token] = o.instrument_id
+        try:
+            await stream.update(
+                [o.provider_token for o in add if o.provider_token is not None],
+                [o.provider_token for o in remove if o.provider_token is not None],
+            )
+        except ProviderError as e:
+            log.warning("option window update failed: %s", e)
+        for o in remove:  # unsubscribed: keep the recorded data, stop mapping ticks
+            tokens.pop(o.provider_token or -1, None)
+        log.info("option window: +%d -%d contracts", len(add), len(remove))
 
     def on_frame(res: FrameResult) -> None:
         if res.heartbeat:
@@ -108,6 +146,10 @@ async def run(settings: Settings | None = None) -> int:
             iid = tokens.get(t.token)
             if iid is not None:
                 pipe.handle_tick(iid, t)
+                if planner is not None and iid == idx.instrument_id:
+                    delta = planner.update(t.ltp)  # re-centre when the ATM strike moves
+                    if delta is not None:
+                        asyncio.get_running_loop().create_task(apply_window(*delta))
 
     async def on_status(state: str, detail: str) -> None:
         pipe.state.update(connected=state == "connected", detail=detail)

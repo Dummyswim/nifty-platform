@@ -71,6 +71,9 @@ export function Chart() {
     savePref(n);
   };
 
+  // when a trading symbol is ambiguous (csv and kite NIFTY 50) the options carry instrument ids
+  const ambiguous = (instruments.data ?? []).filter((x) => x.tradingsymbol === symbol);
+  const selectValue = ambiguous.length > 1 ? ambiguous[0]!.instrument_id : symbol;
   const ready = restored || prefs.isError;
   return (
     <div className="chart-page">
@@ -80,7 +83,7 @@ export function Chart() {
           <button className={!live ? "on" : ""} onClick={() => setLive(false)} data-testid="mode-history">History</button>
           <button className={live ? "on" : ""} onClick={() => { useReplay.getState().exit(); setLive(true); }} data-testid="mode-live">Live</button>
         </div>
-        <select value={symbol} onChange={(e) => pick({ symbol: e.target.value })} aria-label="Symbol">
+        <select value={selectValue} onChange={(e) => pick({ symbol: e.target.value })} aria-label="Symbol">
           {(instruments.data ?? [{ tradingsymbol: symbol, instrument_id: symbol } as InstrumentOut]).map((i) => {
             const dup = (instruments.data ?? []).filter((x) => x.tradingsymbol === i.tradingsymbol).length > 1;
             return (

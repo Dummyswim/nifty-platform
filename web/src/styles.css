@@ -59,3 +59,11 @@ a.btn { background: #1a2133; border: 1px solid var(--line); border-radius: 6px; 
 .echart { height: 240px; width: 100%; background: var(--panel); border-radius: 10px; }
 .banner { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 4px 14px; border-radius: 999px; font-size: 12px; display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); background: #121724ee; }
 .banner.ok { color: #6fd0b8; border-color: #1f6f5e; } .banner.warn { color: #f5a623; border-color: #7a5a1a; } .banner.error { color: #ff8a8a; border-color: #8a2f2f; }
+.wrap { flex-wrap: wrap; } .stats { margin: 8px 0; }
+table.chain { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+.chain th, .chain td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+.chain th:nth-child(4) { text-align: center; background: #151b2b; } .chain tr.atm th { color: #f5a623; } .chain tr.picked { background: #1a2640; }
+.chain td.pick { cursor: pointer; color: var(--accent); } .chain td.pick.sel { background: #223a66; }
+.contract { margin-top: 12px; } .contract-chart { position: relative; height: 340px; } .contract-chart .chart-wrap { position: absolute; inset: 0; }
+.oi-chart { height: 140px; margin-top: 6px; } .greeks { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; align-items: baseline; }
+.chk { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 6px; }

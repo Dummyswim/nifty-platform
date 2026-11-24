@@ -1,9 +1,11 @@
 """KiteStream against a local fake WebSocket server (no network)."""
 
 import asyncio
+import contextlib
 import json
 import struct
 from http import HTTPStatus
+from typing import Any
 
 import pytest
 from websockets.asyncio.server import ServerConnection, serve
@@ -94,3 +96,39 @@ def test_instrument_limits() -> None:
     assert [len(c) for c in chunks(list(range(7000)))] == [3000, 3000, 1000]
     with pytest.raises(ProviderError):
         chunks(list(range(9001)))
+
+
+async def test_dynamic_subscription_updates_the_live_connection_and_the_resubscribe_set() -> None:
+    msgs: list[tuple[int, Any]] = []
+    conns = {"n": 0}
+
+    async def handler(ws: ServerConnection) -> None:
+        conns["n"] += 1
+        async for m in ws:
+            msgs.append((conns["n"], json.loads(m)))
+
+    stop = asyncio.Event()
+    async with serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        s = KiteStream(
+            "k", "t", [1, 2], lambda r: None, base_url=f"ws://127.0.0.1:{port}", sleep=no_sleep
+        )
+        task = asyncio.create_task(s.run(stop))
+        for _ in range(100):
+            if len(msgs) >= 2:
+                break
+            await asyncio.sleep(0.02)
+        await s.update([3, 4, 2], [1])  # 2 is already subscribed: only 3 and 4 are new
+        for _ in range(100):
+            if len(msgs) >= 5:
+                break
+            await asyncio.sleep(0.02)
+        assert [m for _, m in msgs[2:]] == [
+            {"a": "unsubscribe", "v": [1]},
+            {"a": "subscribe", "v": [3, 4]},
+            {"a": "mode", "v": ["full", [3, 4]]},
+        ]
+        assert s._parts[0] == [2, 3, 4]  # a reconnect would subscribe the CURRENT window
+        task.cancel()  # a silent socket only notices `stop` on its next message
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

@@ -102,6 +102,30 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect(toggle).not.toBeChecked();
   await expect(balu).toHaveCount(0);
 
+  // Options on the SYNTHETIC fixture: strike type + expiry -> ATM row, contract chart, honest Greeks
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  await expect(page.getByTestId("atm-strike")).toHaveText("25000");
+  await expect(page.getByTestId("atm-row")).toBeVisible();
+  await page.getByLabel("Strike type").selectOption("ITM");
+  await expect(page.locator("tr.picked")).toHaveAttribute("data-strike", "24900"); // CE ITM = ATM - 2 steps
+  await page.getByLabel("Option type").selectOption("PE");
+  await expect(page.locator("tr.picked")).toHaveAttribute("data-strike", "25100"); // PE mirrored
+  await page.getByLabel("Strike type").selectOption("ATM");
+  await page.getByLabel("Option type").selectOption("CE");
+  await expect(page.getByTestId("contract-panel")).toContainText("25000CE");
+  await expect(page.getByTestId("chart")).toHaveAttribute("data-bars", "3"); // the contract's recorded 1m bars
+  await expect(page.getByTestId("oi-chart")).toHaveAttribute("data-points", "3");
+  await expect(page.getByTestId("greeks")).toContainText("Greeks n/a: set r in Settings");
+  await page.getByLabel("Expiry kind").selectOption("monthly");
+  await expect(page.getByTestId("expiry-date")).not.toHaveText(/unavailable/);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Risk-free rate").fill("6.5");
+  await page.getByRole("button", { name: "Save options settings" }).click();
+  await expect(page.getByTestId("options-settings").getByRole("status")).toHaveText("saved");
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  await page.getByLabel("Expiry kind").selectOption("current weekly");
+  await expect(page.getByTestId("greeks")).toContainText("computed", { timeout: 15_000 });
+
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();
   await expect(page.getByTestId("equity")).toBeVisible();

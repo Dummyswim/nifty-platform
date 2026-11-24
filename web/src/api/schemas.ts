@@ -19,3 +19,7 @@ export type TradeOut = components["schemas"]["TradeRecord"];
 export type AuditOut = components["schemas"]["AuditOut"];
 export type KiteStatusOut = components["schemas"]["KiteStatusOut"];
 export type LoginUrlOut = components["schemas"]["LoginUrlOut"];
+export type ExpiriesOut = components["schemas"]["ExpiriesOut"];
+export type ChainOut = components["schemas"]["ChainOut"];
+export type ChainSide = components["schemas"]["Side"];
+export type ContractBarsOut = components["schemas"]["ContractBarsOut"];

@@ -9,6 +9,7 @@ there is no sudo, extract them locally (no root needed):
   && for d in *.deb; do dpkg-deb -x "$d" .; done
 (this script then adds tools/.e2e-libs/usr/lib/x86_64-linux-gnu to LD_LIBRARY_PATH)."""
 
+import importlib.util
 import os
 import secrets
 import signal
@@ -72,6 +73,13 @@ def seed() -> str:
             Calendar.load(),
         )
         upsert_bars(conn, bars)
+        spec = importlib.util.spec_from_file_location(
+            "options_demo_build", REPO / "fixtures" / "options_demo" / "build.py"
+        )
+        assert spec and spec.loader
+        demo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(demo)
+        demo.seed(conn)  # SYNTHETIC options (nifty_test only)
     eng.dispose()
     return url
 

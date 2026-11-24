@@ -13,6 +13,13 @@ export function MetricCards({ m }: { m: MetricsOut }) {
     ["Max streak", `${m.max_consecutive_wins}W / ${m.max_consecutive_losses}L`],
     ["Sharpe", fmtMetric(m.sharpe), `${m.n_sessions} sessions${m.low_n ? " · LOW N (<30)" : ""}`],
   ];
+  const o = m.option;
+  if (o) {
+    cards.push(
+      ["Option P&L (paper)", `₹${o.total_pnl_inr.toFixed(0)}`, `${o.n_mapped} mapped · cost ₹${o.cost_inr}`],
+      ["No quote / no contract", `${o.no_quote} / ${o.no_contract}`, "skipped, never reconstructed"],
+    );
+  }
   return (
     <div className="metrics" data-testid="metrics">
       {cards.map(([k, v, sub]) => (

@@ -51,6 +51,25 @@ class JobOut(BaseModel):
     backtest_id: str | None = None
 
 
+class OptionPolicyIn(BaseModel):
+    strike_type: Literal["Deep ITM", "ITM", "ATM", "OTM", "Deep OTM"] = "ATM"
+    expiry_kind: Literal["current weekly", "next weekly", "monthly"] = "current weekly"
+    lots: int = Field(1, ge=1)
+    cost_inr: float = Field(0.0, ge=0)
+    max_stale_s: float = Field(60.0, gt=0)
+
+
+class OptionSummary(BaseModel):
+    """CE/PE paper mapping totals (INR, never mixed with index points)."""
+
+    n_mapped: int
+    no_quote: int
+    no_contract: int
+    total_pnl_inr: float
+    cost_inr: float
+    policy: dict[str, Any]
+
+
 class MetricsOut(BaseModel):
     n_trades: int
     wins: int
@@ -68,6 +87,7 @@ class MetricsOut(BaseModel):
     n_sessions: int
     low_n: bool
     flags: list[str]
+    option: OptionSummary | None = None
 
 
 class BacktestOut(BaseModel):
@@ -156,6 +176,7 @@ class BacktestIn(RunIn):
     mode: Literal["tv", "conservative"] = "tv"
     qty: float = Field(1.0, gt=0)
     cost_pts: float = Field(0.0, ge=0)
+    option_policy: OptionPolicyIn | None = None
 
 
 def _begin() -> Any:
