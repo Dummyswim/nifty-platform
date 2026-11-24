@@ -5,6 +5,7 @@ import type { EngineOut, EventsOut, JobOut, OverlaysOut, PlotsOut, SubmitOut } f
 import { TF_SEC } from "../replay/logic";
 import type { Tf } from "../chart/geometry";
 import { type PlotLayer, plotLayers } from "../overlay/layers";
+import { overlayFor, plotVisible } from "./visibility";
 import { type El, toEl } from "../overlay/pick";
 import { type Field, type Schema, defaultsOf, fieldsFromSchema, paramsForRun } from "./schemaForm";
 
@@ -96,12 +97,18 @@ export function useIndicators(symbol: string, live: { source: string; version: n
     const plots = outs[i * 3]?.data as PlotsOut | undefined;
     const ov = outs[i * 3 + 2]?.data as OverlaysOut | undefined;
     if (plots) {
-      layers.push(...plotLayers(e, plots, TF_SEC[e.default_timeframe as Tf] ?? 300, state[e.id]!.ui));
+      layers.push(...plotLayers(e, plots, TF_SEC[e.default_timeframe as Tf] ?? 300, state[e.id]!.ui).filter((l) => plotVisible(e.id, l.name, state[e.id]!.ui, state[e.id]!.params)));
       const ui = state[e.id]!.ui;
       // Balu: "Show Panel", NVS: "Show Table" (both default on); the card is hidden when switched off
       if (ui.show_panel !== false && ui.show_table !== false) panels.push({ engine: e, panel: plots.panel, times: plots.t });
     }
-    if (ov) overlays.push(...ov.overlays.map(toEl));
+    if (ov) {
+      const { ui, params } = state[e.id]!;
+      for (const o of ov.overlays) {
+        const shown = overlayFor(e.id, toEl(o), ui, params);
+        if (shown) overlays.push(shown);
+      }
+    }
   });
   const colors = useMemo(() => {
     const c: Record<string, string> = {};
