@@ -49,7 +49,9 @@ def parse_master(text: str, version: str | None = None) -> list[Instrument]:
                     if is_deriv and typ != "FUT" and r["strike"]
                     else None,
                     option_type=typ if typ in ("CE", "PE") else None,  # type: ignore[arg-type]
-                    tick_size=float(r["tick_size"]) if r["tick_size"] else None,
+                    tick_size=float(r["tick_size"])
+                    if r["tick_size"] and float(r["tick_size"]) > 0
+                    else None,  # index rows list 0
                     lot_size=int(r["lot_size"])
                     if r["lot_size"] and int(r["lot_size"]) > 0
                     else None,

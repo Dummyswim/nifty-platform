@@ -307,6 +307,28 @@ def _kite_backfill(a: argparse.Namespace) -> int:
     return 0
 
 
+def _set_tick_size(a: argparse.Namespace) -> int:
+    """Indexes have no tick size in the Kite master; the user supplies it (survives refreshes)."""
+    from sqlalchemy import text
+
+    from nifty.db.session import get_engine
+
+    if a.tick <= 0:
+        print("FAIL tick must be > 0")
+        return 2
+    with get_engine().begin() as conn:
+        n = conn.execute(
+            text("UPDATE instruments SET tick_size = :t WHERE instrument_id = :i"),
+            {"t": a.tick, "i": a.instrument},
+        ).rowcount
+    print(
+        f"tick_size={a.tick} set on {a.instrument}"
+        if n
+        else f"FAIL no such instrument {a.instrument}"
+    )
+    return 0 if n else 2
+
+
 def _kite_smoke(a: argparse.Namespace) -> int:
     """User-run live check. Prints PASS/FAIL/INFO lines; never a secret."""
     from datetime import timedelta
@@ -498,6 +520,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--symbol", default="NIFTY 50")
     p.add_argument("--from", dest="from_date", required=True)
     p.add_argument("--to", dest="to_date", required=True)
+    p = sub.add_parser("set-tick-size", help="set an instrument's tick size (user-provided fact)")
+    p.add_argument("--instrument", default="kite:NSE:NIFTY 50")
+    p.add_argument("--tick", type=float, required=True)
     p = sub.add_parser("kite-smoke", help="live check, run by you after Connect Kite")
     p.add_argument(
         "--probe-limits", action="store_true", help="also test the 60/61-day minute range"
@@ -543,6 +568,8 @@ def main(argv: list[str] | None = None) -> int:
         return _kite_instruments(args)
     elif args.cmd == "kite-backfill":
         return _kite_backfill(args)
+    elif args.cmd == "set-tick-size":
+        return _set_tick_size(args)
     elif args.cmd == "kite-smoke":
         return _kite_smoke(args)
     elif args.cmd == "research-counts":

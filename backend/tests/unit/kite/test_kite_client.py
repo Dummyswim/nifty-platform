@@ -341,3 +341,9 @@ def test_next_expiry_is_0600_ist() -> None:
     assert next_expiry(ist(2026, 11, 23, 9, 0)) == ist(2026, 11, 24, 6, 0)
     assert next_expiry(ist(2026, 11, 23, 5, 59)) == ist(2026, 11, 23, 6, 0)
     assert next_expiry(ist(2026, 11, 23, 6, 0)) == ist(2026, 11, 24, 6, 0)
+
+
+def test_index_without_listed_tick_size_is_none_not_zero() -> None:
+    # the master lists 0 for indexes; 0 must never reach the engines as a tick size (division by zero)
+    idx = next(i for i in parse_master(fx("instruments.csv")) if i.instrument_type == "INDEX")
+    assert idx.tick_size is None

@@ -15,7 +15,13 @@ def upsert_instrument(conn: Connection, ins: Instrument) -> None:
     vals["provider_meta"] = json.dumps(ins.provider_meta)
     cols = ", ".join([*_COLS, "provider_meta"])
     params = ", ".join([f":{c}" for c in _COLS] + ["CAST(:provider_meta AS jsonb)"])
-    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in [*_COLS[1:], "provider_meta"])
+    # a tick size the master does not list (indexes) must survive a refresh: it was set by the user
+    sets = ", ".join(
+        f"{c} = COALESCE(EXCLUDED.{c}, instruments.{c})"
+        if c == "tick_size"
+        else f"{c} = EXCLUDED.{c}"
+        for c in [*_COLS[1:], "provider_meta"]
+    )
     conn.execute(
         text(
             f"INSERT INTO instruments ({cols}) VALUES ({params}) "
