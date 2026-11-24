@@ -1,7 +1,7 @@
 # STATE (≤150 lines; prune every session)
 
-next_chunk: C15
-last_update: 2026-11-24 (C14)
+next_chunk: DONE
+last_update: 2026-11-24 (C15)
 env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redis 8.0) · golden_tv=none · kite_creds=user-has (live verified 2026-11-23: login, profile, master, 1m candles)
 
 ## Chunks (status: pending | partial | done; partial needs resume_at)
@@ -22,6 +22,7 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 | C12 | done | options chain/Greeks/recording window/paper mapping + Options page |
 | C13 | done | research engine `research.distance_entry_v1`: features, 3 baselines, armed resumption, outcomes |
 | C14 | done | research runs, statistics, verdict, Research page |
+| C15 | done | lockfile (`make lock`), security tests, backup, README, HANDOFF, EVIDENCE, PORTING |
 | C14 | pending | research runs, statistics, verdict, UI |
 | C15 | pending | hardening, lockfiles, handoff |
 
@@ -120,7 +121,10 @@ env: provider=kite · docker=no · db=native(WSL pg18.7+timescaledb 2.32.1, redi
 - ruff rules pinned in pyproject (E,F,I,UP,B; B008 ignored for FastAPI Depends). `/healthz` and `/readyz` are at root (not under /api/v1) to match the acceptance curls.
 - C14: checkpoint is per (variant, experiment) cell, not per session (one stateful engine pass cannot be split across sessions without breaking D14 state continuity). Purge drops a trade of an earlier split if max(exit, entry + max_hold) reaches the next split's first bar. EMA9/21 + anchor lines in the drilldown come from enabling the research engine in the chart's indicator panel (the focus overlay adds entry/stop/target lines and event markers). Oracle (17 sessions) => `inconclusive` as required.
 
+- C15: `/docs`, `/redoc`, `/openapi.json` disabled (unauthenticated schema leak; `nifty.cli openapi` unaffected). Lockfile built with a dry-run resolve (shared venv untouched). Docker checks (`compose config`, build, `make up`) NOT run: no Docker on the host. Evidence table: `docs/EVIDENCE.md`; handoff: `docs/HANDOFF.md`.
+
 ## Open issues / ASKs
+- FINAL STATUS (C15): all chunks done. Remaining gaps: golden exports, live Kite WS/option recording, Docker, holiday 2026-11-10, `anchor_cross_ema_order` interpretation. One intermittent failure of `test_options_api::test_contract_bars_have_volume_oi_and_coverage_flags` seen once in a full run (passes alone and in 3 reruns; likely clock related, not investigated).
 - `anchor_cross_ema_order` is OUR interpretation (prompt does not define the crossover): prev close <= prev V and close > V (mirrored) with F > S (F < S). Check it before reading any result. Oracle counts (5,996 bars, stop 12, hold 10): 97/94 (anchor cross), 437/401 (gap re-expansion), 267/251 (aligned), 29/29 (armed) trades for target 10/20; counts only.
 - Balu golden export: see the C11 reply (RUNBOOK §Golden). `golden_tv` stays `none` until you confirm both files exist (`fixtures/tv_golden/nvs/*`, `fixtures/tv_golden/balu/ohlc_plots.csv`).
 - C08 live Kite is user-only (market hours): Connect Kite, then `make live` (needs the API/worker running as in C07), open the app, Chart -> Live on NIFTY 50, and check Settings/collector status; paste anything odd (packet endianness and the WS entitlement are unverified).

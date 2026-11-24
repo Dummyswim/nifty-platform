@@ -27,7 +27,10 @@ def head_revision() -> str | None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="NIFTY Platform", version="0.1.0")
+    # no unauthenticated schema pages; `nifty.cli openapi` builds the schema offline
+    app = FastAPI(
+        title="NIFTY Platform", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None
+    )
     app.state.throttle = Throttle()
 
     @app.get("/healthz")

@@ -12,7 +12,7 @@ define step
 @out=$$($(2) 2>&1); rc=$$?; if [ $$rc -ne 0 ]; then echo "FAIL: $(1)"; echo "$$out" | head -n 15; exit $$rc; else echo "ok: $(1)"; fi
 endef
 
-.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke live demo start
+.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke live demo start lock backup
 
 up:
 	@$(COMPOSE) up -d --build
@@ -82,3 +82,13 @@ demo:
 
 start:
 	@$(PY) tools/start.py $(ARGS)
+
+# exact pins; dry-run resolve only, so the shared venv is not touched (D24)
+lock:
+	@cd /tmp && $(PY) -m pip install --dry-run --ignore-installed --quiet --report $(CURDIR)/.lock.json -e "$(CURDIR)/backend[dev]"
+	@$(PY) tools/mklock.py .lock.json backend/requirements.lock
+
+# database dump into the gitignored backups/ (restore steps: docs/HANDOFF.md)
+backup:
+	@mkdir -p backups
+	@f=backups/nifty-$$(date +%Y%m%d-%H%M%S).sql.gz; $(COMPOSE) exec -T db sh -c 'pg_dump -U $$POSTGRES_USER $$POSTGRES_DB' | gzip > $$f && echo "wrote $$f"

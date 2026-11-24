@@ -42,3 +42,4 @@ web/coverage/
 tools/.e2e-libs/
 web/test-results/
 web/playwright-report/
+.lock.json
