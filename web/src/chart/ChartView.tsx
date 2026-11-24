@@ -250,8 +250,12 @@ export function ChartView({
     if (!chart) return;
     const map = plotSeries.current;
     const wanted = new Map<string, { p: PlotLayer; data: { time: number; value?: number }[] }>();
+    // Only points on a candle time: the chart numbers bars over the union of all series' times, and the
+    // overlay layer counts candle bars only, so an extra plot point (older history than the loaded candles,
+    // or an engine bar between two candles) would shift every zone and marker off its place.
+    const have = new Set(cols.current.t);
     for (const p of plots) {
-      const pts = revealPlot(p, cursor);
+      const pts = revealPlot(p, cursor).filter((q) => have.has(q.time));
       if (p.kind === "step") splitRuns(pts).forEach((run, i) => wanted.set(`${p.key}#${i}`, { p, data: run }));
       else wanted.set(p.key, { p, data: pts });
     }
@@ -273,7 +277,7 @@ export function ChartView({
       }
       s.setData(data as never);
     }
-  }, [plots, cursor]);
+  }, [plots, cursor, nBars]);
 
   // overlay elements picked for the cursor
   useEffect(() => {
