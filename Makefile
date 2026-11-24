@@ -12,7 +12,7 @@ define step
 @out=$$($(2) 2>&1); rc=$$?; if [ $$rc -ne 0 ]; then echo "FAIL: $(1)"; echo "$$out" | head -n 15; exit $$rc; else echo "ok: $(1)"; fi
 endef
 
-.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke live demo start lock backup
+.PHONY: up down ps logs check test migrate db-q init-env hash-password api-types parity bench e2e bars kite-smoke live demo start lock backup session-monitor session-report
 
 up:
 	@$(COMPOSE) up -d --build
@@ -92,3 +92,10 @@ lock:
 backup:
 	@mkdir -p backups
 	@f=backups/nifty-$$(date +%Y%m%d-%H%M%S).sql.gz; $(COMPOSE) exec -T db sh -c 'pg_dump -U $$POSTGRES_USER $$POSTGRES_DB' | gzip > $$f && echo "wrote $$f"
+
+# live-session review (docs/LIVE_SESSION.md): sample health/resources, then build the report
+session-monitor:
+	@$(PY) tools/session_review.py monitor $(ARGS)
+
+session-report:
+	@$(PY) tools/session_review.py report $(ARGS)
