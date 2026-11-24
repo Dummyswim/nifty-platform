@@ -71,9 +71,11 @@ def feed(p: Pipeline, bars: list[Bar]) -> None:
             p.handle_tick(DEMO_ID, t)
 
 
-def stored(db: Engine) -> dict[str, object]:
+def stored(db: Engine, tf: str = "5m") -> dict[str, object]:
     with db.connect() as c:
-        rid = c.execute(text("select run_id from engine_runs")).scalar_one()
+        rid = c.execute(
+            text("select run_id from engine_runs where timeframe = :tf"), {"tf": tf}
+        ).scalar_one()
         return {
             "plots": [(r[0], r[1]) for r in c.execute(text("select bar_start_utc, values from plot_points where run_id=:r order by 1"), {"r": rid})],
             "events": [r[0] for r in c.execute(text("select envelope from events where run_id=:r order by ord"), {"r": rid})],
@@ -268,3 +270,23 @@ def test_collector_status_endpoint_and_instrument_list_hides_empty_demo(
     st = ws_client.get("/api/v1/collector/status").json()
     assert st["state"] == "live" and st["instruments"] == [DEMO_ID] and st["ticks"] == 20
     assert [i["tradingsymbol"] for i in ws_client.get("/api/v1/instruments").json()] == [DEMO_ID]
+
+
+@pytest.mark.parametrize("tf", ["1m", "15m", "1h"])
+def test_pine_engines_run_live_on_every_intraday_timeframe(
+    db: Engine, src: list[Bar], tf: str
+) -> None:
+    p = pipe(db)
+    feed(p, src)
+    p.finish()
+    with db.connect() as c:
+        assert (
+            c.execute(text("select count(distinct timeframe) from engine_runs")).scalar_one() == 7
+        )
+        bars = read_bars(c, DEMO_ID, "1m")
+    batch = run_batch(
+        "pine.nvs_scalper", {}, bars, tf, instrument=INS, calendar=CAL, source_id=f"live:{DEMO_ID}"
+    )
+    got = stored(db, tf)
+    assert [t for t, _ in got["plots"]] == [t for t, _ in batch.plots]  # type: ignore[attr-defined]
+    assert [e["event_id"] for e in got["events"]] == [str(e.event_id) for e in batch.events]  # type: ignore[attr-defined]

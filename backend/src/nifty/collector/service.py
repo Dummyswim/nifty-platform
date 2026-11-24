@@ -21,7 +21,7 @@ from nifty.contracts import Bar, Instrument
 from nifty.db.bars import read_bars, upsert_bars
 from nifty.db.live import append_delta, ensure_live_run, insert_ticks, write_status
 from nifty.engines.base import get_engine, load_builtin_engines
-from nifty.engines.live import LiveRun
+from nifty.engines.live import LiveRun, live_timeframes, run_label
 from nifty.timeutil import Calendar, utcnow
 
 log = logging.getLogger("nifty.collector")
@@ -66,6 +66,9 @@ class Feed:
     builder: BarBuilder
     runs: list[LiveRun] = field(default_factory=list)
     run_ids: dict[str, str] = field(default_factory=dict)
+    default_tf: dict[str, bool] = field(
+        default_factory=dict
+    )  # run label -> is the engine default tf
 
 
 class Pipeline:
@@ -95,8 +98,10 @@ class Pipeline:
         is_index = ins.instrument_type == "INDEX"
         feed = Feed(ins, BarBuilder(ins.instrument_id, is_index, self.cal, self.provider))
         for eid, params in (engines or {}).items():
-            get_engine(eid)  # unknown / unready engine: fail at startup, not mid-session
-            feed.runs.append(LiveRun(eid, params, ins, None, self.cal))
+            spec = get_engine(eid)  # unknown / unready engine: fail at startup, not mid-session
+            for tf in live_timeframes(eid, spec.cls.default_timeframe):
+                feed.runs.append(LiveRun(eid, params, ins, tf, self.cal))
+                feed.default_tf[run_label(eid, tf)] = tf == spec.cls.default_timeframe
         self.feeds[ins.instrument_id] = feed
         self.rebuild_runs(feed)
         return feed
@@ -125,11 +130,12 @@ class Pipeline:
                     c, feed.instrument.instrument_id, "1m", self.cal.session_bounds(first_day)[0]
                 )
             fresh = [
-                LiveRun(r.engine_id, r.params, feed.instrument, None, self.cal) for r in feed.runs
+                LiveRun(r.engine_id, r.params, feed.instrument, r.timeframe, self.cal)
+                for r in feed.runs
             ]
             for run in fresh:
                 rid = ensure_live_run(c, run, feed.instrument.instrument_id)
-                feed.run_ids[run.engine_id] = rid
+                feed.run_ids[run_label(run.engine_id, run.timeframe)] = rid
                 for b in bars:
                     append_delta(c, rid, run.feed(b))
             feed.runs = fresh
@@ -156,6 +162,8 @@ class Pipeline:
             if prov is not None:
                 msg: dict[str, Any] = {"type": "provisional", "bar": bar_json(prov)}
                 for run in feed.runs:
+                    if not feed.default_tf[run_label(run.engine_id, run.timeframe)]:
+                        continue  # early alerts come from the default-timeframe run only
                     p = run.provisional(prov)
                     if p is not None:
                         evs = [e.model_dump(mode="json") for e in p["events"]]
@@ -174,7 +182,7 @@ class Pipeline:
             upsert_bars(c, [bar])
             for run in feed.runs:
                 d = run.feed(bar)
-                append_delta(c, feed.run_ids[run.engine_id], d)
+                append_delta(c, feed.run_ids[run_label(run.engine_id, run.timeframe)], d)
                 deltas.append(d)
         self.pub.publish(
             f"live:{feed.instrument.instrument_id}", {"type": "wake", "bar": bar_json(bar)}

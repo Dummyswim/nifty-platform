@@ -61,6 +61,9 @@ const candles = (c: Cols): CandlestickData<Time>[] =>
 
 interface Legend { t: number; o: number; h: number; l: number; c: number; v: number }
 
+/** Empty bars kept to the right of the last bar; open-ended zones and levels extend across them (as in TradingView). */
+const FUTURE_BARS = 30;
+
 export function ChartView({
   symbol, tf, tool, drawings, onCreate, onUpdate, onDelete, onToolDone,
   plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes, liveBars = null,
@@ -106,7 +109,7 @@ export function ChartView({
       rightPriceScale: { borderColor: "#252b3a" },
       localization: { timeFormatter: (t: Time) => fmtIst(t as number) },
       timeScale: {
-        borderColor: "#252b3a", timeVisible: true, secondsVisible: false, rightOffset: 6,
+        borderColor: "#252b3a", timeVisible: true, secondsVisible: false, rightOffset: FUTURE_BARS,
         tickMarkFormatter: (t: Time, type: number) => tickLabel(t as number, type),
       },
     });
@@ -275,7 +278,7 @@ export function ChartView({
   // overlay elements picked for the cursor
   useEffect(() => {
     const t = cols.current.t;
-    const end = t.length ? t[t.length - 1]! + TF_SEC[tf] : 0;
+    const end = t.length ? t[t.length - 1]! + TF_SEC[tf] * FUTURE_BARS : 0; // zones/levels run on into the empty space
     const picked = pickOverlays(overlays, cursor, end);
     ovPrim.current.set(picked, t, overlayColors ?? {});
     setEntries(picked.filter((o) => o.kind === "marker" && o.id.endsWith(":entry")).length);

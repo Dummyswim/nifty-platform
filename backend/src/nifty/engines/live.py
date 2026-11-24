@@ -12,6 +12,23 @@ from nifty.engines.runner import ChartBuilder, _Run
 from nifty.marketdata.resample import resample
 from nifty.timeutil import Calendar
 
+# Pine ports run live on every intraday chart timeframe, so the chart can show the run of its own
+# timeframe (as TradingView does); other engines run on their default timeframe only.
+INTRADAY_TFS = ("1m", "3m", "5m", "10m", "15m", "30m", "1h")
+
+
+def live_timeframes(engine_id: str, default: str) -> tuple[str, ...]:
+    return INTRADAY_TFS if engine_id.startswith("pine.") else (default,)
+
+
+def live_tf(engine_id: str, chart_tf: str, default: str) -> str:
+    """The timeframe of the live run a chart on `chart_tf` shows for this engine."""
+    return chart_tf if engine_id.startswith("pine.") and chart_tf in INTRADAY_TFS else default
+
+
+def run_label(engine_id: str, timeframe: str) -> str:
+    return f"{engine_id}@{timeframe}"
+
 
 @dataclass
 class LiveDelta:

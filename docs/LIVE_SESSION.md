@@ -10,7 +10,8 @@
 4. Stop with Ctrl-C and restart as `make start ARGS=--live` (API + worker + web + live collector, one terminal).
 5. Second terminal: `make session-monitor` (samples health, ticks, CPU and memory every 15 s into
    `logs/session/<date>/monitor.jsonl`). Leave it running until after 15:30.
-6. Chart -> **Live** on NIFTY 50. Within ~10 s the badge should be `live` and the last candle should move.
+6. Chart: pick **kite:NSE:NIFTY 50** in the symbol selector (not `csv:NIFTY 50`), then **Live**. Balu and NVS run live on every intraday timeframe, so any chart timeframe shows its own run.
+   Within ~10 s the badge should be `live` and the last candle should move.
 
 ## What to watch during the session
 - Live badge: `live` good; `stale` (no ticks for a while), `disconnected`, `auth_expired` (reconnect Kite), `down` (collector died).
@@ -29,7 +30,7 @@
 2. (Optional, writes through the revision log) compare live bars with Kite's official candles:
    `cd backend && python -m nifty.cli kite-backfill --from <today> --to <today>` — the output prints how many bars were *revised*;
    revised > 0 means a live bar differed from Kite's (record how many and by how much in `bars` revisions).
-3. `make session-report` (add `ARGS="--date 2026-11-24"` for another day). It writes `logs/session/<date>/`:
+3. `make session-report` (add `ARGS="--date 2026-11-24"` for another day; it reads `kite:NSE:NIFTY 50`). It writes `logs/session/<date>/`:
    - `report.md`: bars stored vs 375 expected and gaps; tick count, longest gaps, exchange->received latency p50/p95;
      live events per engine with availability lag after bar close; **live vs batch rerun** (events must match, D14);
      trades each engine suggested; option contracts recorded; API/collector/CPU/RSS summary.

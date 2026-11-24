@@ -23,6 +23,7 @@ from nifty.db.instruments import find_instrument
 from nifty.db.live import read_status, status_summary
 from nifty.db.session import get_engine
 from nifty.engines.base import get_engine as get_engine_spec
+from nifty.engines.live import live_tf
 from nifty.security import read_session
 from nifty.timeutil import Calendar
 
@@ -141,9 +142,13 @@ class Session:
             row = c.execute(
                 text(
                     "SELECT run_id, panel FROM engine_runs WHERE engine_id = :e AND source_id = :s "
-                    "ORDER BY created_at DESC LIMIT 1"
+                    "AND timeframe = :tf ORDER BY created_at DESC LIMIT 1"
                 ),
-                {"e": eid, "s": f"live:{self.iid}"},
+                {
+                    "e": eid,
+                    "s": f"live:{self.iid}",
+                    "tf": live_tf(eid, self.tf, get_engine_spec(eid).cls.default_timeframe),
+                },
             ).first()
             if row is None:
                 continue

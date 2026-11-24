@@ -73,10 +73,10 @@ export function useIndicators(symbol: string, chartTf: string, live: { source: s
   const runKey = (e: EngineOut) => paramsForRun(fieldsOf(e), state[e.id]!.params);
   const runs = useQueries({
     queries: active.map((e) => ({
-      queryKey: ["run", e.id, symbol, live ? e.default_timeframe : engineTf(e, chartTf), JSON.stringify(runKey(e)), live?.source ?? "", live?.version ?? 0],
+      queryKey: ["run", e.id, symbol, engineTf(e, chartTf), JSON.stringify(runKey(e)), live?.source ?? "", live?.version ?? 0],
       // live: the collector's own run (source live:<instrument>), refetched when the server says outputs changed
       queryFn: live
-        ? () => api<PlotsOut>(`/plots?engine_id=${e.id}&snapshot_id=${encodeURIComponent(live.source)}&timeframe=${e.default_timeframe}`).then((p) => p.run_id)
+        ? () => api<PlotsOut>(`/plots?engine_id=${e.id}&snapshot_id=${encodeURIComponent(live.source)}&timeframe=${engineTf(e, chartTf)}`).then((p) => p.run_id)
         : () => runEngine(e, symbol, runKey(e), engineTf(e, chartTf)),
       staleTime: Infinity,
     })),
@@ -103,7 +103,7 @@ export function useIndicators(symbol: string, chartTf: string, live: { source: s
     const plots = outs[i * 3]?.data as PlotsOut | undefined;
     const ov = outs[i * 3 + 2]?.data as OverlaysOut | undefined;
     if (plots) {
-      layers.push(...plotLayers(e, plots, TF_SEC[(live ? e.default_timeframe : engineTf(e, chartTf)) as Tf] ?? 300, state[e.id]!.ui).filter((l) => plotVisible(e.id, l.name, state[e.id]!.ui, state[e.id]!.params)));
+      layers.push(...plotLayers(e, plots, TF_SEC[(engineTf(e, chartTf)) as Tf] ?? 300, state[e.id]!.ui).filter((l) => plotVisible(e.id, l.name, state[e.id]!.ui, state[e.id]!.params)));
       const ui = state[e.id]!.ui;
       // Balu: "Show Panel", NVS: "Show Table" (both default on); the card is hidden when switched off
       if (ui.show_panel !== false && ui.show_table !== false) panels.push({ engine: e, panel: plots.panel, times: plots.t });

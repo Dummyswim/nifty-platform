@@ -156,6 +156,7 @@ def report(day: date, symbol: str) -> int:
         runs = c.execute(text("SELECT run_id, engine_id, config_hash, timeframe FROM engine_runs WHERE instrument_id=:i AND source_id LIKE 'live:%'"), {"i": iid}).all()
         ev_rows: list[dict[str, Any]] = []
         md += ["## Live engine output"]
+        trades_started = False
         for rid, eid, chash, tf in runs:
             evs = c.execute(text("SELECT event_type, bar_start_utc, available_at_utc, envelope FROM events WHERE run_id=:r AND confirmed_or_provisional='confirmed' AND bar_start_utc>=:a AND bar_start_utc<:b ORDER BY bar_start_utc, ord"), {"r": rid, "a": lo, "b": hi}).all()
             by: dict[str, int] = {}
@@ -177,13 +178,14 @@ def report(day: date, symbol: str) -> int:
                 ev_rows.append({"engine": eid, "type": f"MISMATCH:{t}", "bar_start_ist": b.astimezone(IST).strftime("%H:%M"), "available_ist": "", "lag_s_after_bar_end": "", "payload": "live-only" if (t, b) in live else "batch-only"})  # fmt: skip
             day_trades = [t for t in res.trades if lo <= t.entry_time < hi]
             md.append(f"  - trades suggested (batch on stored bars): {len(day_trades)}; net pts {sum(t.net_pts for t in day_trades):.2f}")
-            mode = "w" if not (d / "trades.csv").exists() or eid == runs[0][1] else "a"
+            mode = "a" if trades_started else "w"
+            trades_started = True
             with (d / "trades.csv").open(mode, newline="") as f:
                 w = csv.writer(f)
                 if mode == "w":
-                    w.writerow(["engine", "side", "signal_ist", "entry_ist", "entry_px", "exit_ist", "exit_px", "reason", "net_pts", "flags"])
+                    w.writerow(["engine", "tf", "side", "signal_ist", "entry_ist", "entry_px", "exit_ist", "exit_px", "reason", "net_pts", "flags"])
                 for t in day_trades:
-                    w.writerow([eid, t.side, t.signal_bar_start.astimezone(IST).strftime("%H:%M") if t.signal_bar_start else "", t.entry_time.astimezone(IST).strftime("%H:%M"), t.entry_px, t.exit_time.astimezone(IST).strftime("%H:%M"), t.exit_px, t.exit_reason, round(t.net_pts, 2), "|".join(t.flags)])  # fmt: skip
+                    w.writerow([eid, tf, t.side, t.signal_bar_start.astimezone(IST).strftime("%H:%M") if t.signal_bar_start else "", t.entry_time.astimezone(IST).strftime("%H:%M"), t.entry_px, t.exit_time.astimezone(IST).strftime("%H:%M"), t.exit_px, t.exit_reason, round(t.net_pts, 2), "|".join(t.flags)])  # fmt: skip
         if not runs:
             md.append("- no live runs recorded for this instrument")
         if ev_rows:
@@ -228,7 +230,7 @@ def main() -> int:
     m.add_argument("--every", type=float, default=15.0)
     r = sub.add_parser("report")
     r.add_argument("--date", type=date.fromisoformat, default=today_ist())
-    r.add_argument("--symbol", default="NIFTY 50")
+    r.add_argument("--symbol", default="kite:NSE:NIFTY 50")
     a = ap.parse_args()
     return monitor(a.every) if a.cmd == "monitor" else report(a.date, a.symbol)
 
