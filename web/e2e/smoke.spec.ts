@@ -22,9 +22,9 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect(chart).toHaveAttribute("data-symbol", "NIFTY 50");
   await expect(chart).toHaveAttribute("data-tf", "1m"); // default landing view
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(1000);
-  // NVS is on by default: its 15 entry markers draw even on the 1m chart (outputs are time-anchored)
+  // NVS is on by default and runs on the chart's own timeframe: 18 entries on 1m (15 on 5m, checked below)
   await expect(page.getByTestId("status-pine.nvs_scalper")).toHaveText("ready", { timeout: 45_000 });
-  await expect(chart).toHaveAttribute("data-entry-markers", "15");
+  await expect(chart).toHaveAttribute("data-entry-markers", "18");
   await expect(page.getByTestId("engine-panel").filter({ hasText: "pine.nvs_scalper" })).toContainText("VWAP");
   const nOverlays = Number(await chart.getAttribute("data-overlays"));
   expect(nOverlays).toBeGreaterThan(15);
@@ -33,6 +33,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
 
   await page.locator('button[data-tf="5m"]').click();
   await expect(chart).toHaveAttribute("data-tf", "5m");
+  await expect(chart).toHaveAttribute("data-entry-markers", "15", { timeout: 45_000 });
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(100);
   expect(Number(await chart.getAttribute("data-bars"))).toBeLessThan(bars1m);
   await expect(page.getByTestId("legend-c")).toHaveText(/^\d+\.\d\d$/);
@@ -71,6 +72,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await expect(chart).toHaveAttribute("data-entry-markers", "15");
   await expect(page.getByTestId("replay-badge")).toHaveCount(0);
 
+  const overlays5m = Number(await chart.getAttribute("data-overlays")); // NVS on the 5m chart
   // backtest -> trades -> audit -> open on chart
   await page.getByRole("button", { name: "Backtests", exact: true }).click();
   await page.getByTestId("run-backtest").click();
@@ -81,7 +83,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByTestId("open-chart").click();
   await expect(chart).toHaveAttribute("data-tf", "5m");
   await expect(chart).toHaveAttribute("data-cursor", "");
-  await expect.poll(async () => Number(await chart.getAttribute("data-overlays"))).toBeGreaterThan(nOverlays); // audit lines
+  await expect.poll(async () => Number(await chart.getAttribute("data-overlays"))).toBeGreaterThan(overlays5m); // audit lines
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(100);
   if (SHOT) await page.screenshot({ path: SHOT.replace(/\.png$/, "-audit.png") });
 

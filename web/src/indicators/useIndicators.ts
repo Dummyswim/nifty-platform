@@ -22,10 +22,10 @@ export type RunStatus = { state: "running" } | { state: "failed"; error: string 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Submit `engines/{id}/run` (same key => cached run), poll the job, resolve to the run id. */
-/** History view: a Pine port runs on the chart's own timeframe (as in TradingView) when that is 5m, 15m or 30m;
- *  otherwise (and for the research engine, and live) on its default timeframe. */
+/** History view: a Pine port runs on the chart's own timeframe (as in TradingView) when that is intraday (1m..1h);
+ *  otherwise (1D, the research engine, and live) on its default timeframe. */
 export function engineTf(engine: EngineOut, chartTf: string): string {
-  return engine.id.startsWith("pine.") && ["5m", "15m", "30m"].includes(chartTf) ? chartTf : engine.default_timeframe;
+  return engine.id.startsWith("pine.") && ["1m", "3m", "5m", "10m", "15m", "30m", "1h"].includes(chartTf) ? chartTf : engine.default_timeframe;
 }
 
 export async function runEngine(engine: EngineOut, symbol: string, params: Record<string, unknown>, timeframe: string = engine.default_timeframe): Promise<string> {
