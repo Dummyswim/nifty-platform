@@ -116,7 +116,8 @@ export function ChartView({
       },
     });
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      // borders match the bodies; they must stay visible or a hollow provisional candle shows only its wick
+      upColor: "#26a69a", downColor: "#ef5350", borderUpColor: "#26a69a", borderDownColor: "#ef5350", wickUpColor: "#26a69a", wickDownColor: "#ef5350",
       lastValueVisible: true, priceLineVisible: true,
     });
     series.attachPrimitive(fillPrim.current);
