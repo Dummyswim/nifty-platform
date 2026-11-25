@@ -19,7 +19,13 @@ from nifty.collector.bars import BarBuilder, Throttle, Watchdog
 from nifty.collector.packets import PacketTick
 from nifty.contracts import Bar, Instrument
 from nifty.db.bars import read_bars, upsert_bars
-from nifty.db.live import append_delta, ensure_live_run, insert_ticks, write_status
+from nifty.db.live import (
+    append_delta,
+    clear_live_outputs,
+    ensure_live_run,
+    insert_ticks,
+    write_status,
+)
 from nifty.engines.base import get_engine, load_builtin_engines
 from nifty.engines.live import LiveRun, live_timeframes, run_label
 from nifty.timeutil import Calendar, utcnow
@@ -106,8 +112,8 @@ class Pipeline:
         return feed
 
     def rebuild_runs(self, feed: Feed) -> None:
-        """Restart/resync (D14): fresh runners replay the stored 1m bars of the last sessions; the
-        outputs are written again idempotently, so the result equals an uninterrupted run."""
+        """Restart/resync (D14): fresh runners replay the stored 1m bars of the last sessions and
+        replace the run's stored outputs (the window slides, so they would not merge cleanly)."""
         if not feed.runs:
             return
         with self.db.begin() as c:
@@ -135,6 +141,7 @@ class Pipeline:
             for run in fresh:
                 rid = ensure_live_run(c, run, feed.instrument.instrument_id)
                 feed.run_ids[run_label(run.engine_id, run.timeframe)] = rid
+                clear_live_outputs(c, rid)
                 for b in bars:
                     append_delta(c, rid, run.feed(b))
             feed.runs = fresh

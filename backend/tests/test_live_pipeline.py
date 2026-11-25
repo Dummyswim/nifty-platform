@@ -290,3 +290,38 @@ def test_pine_engines_run_live_on_every_intraday_timeframe(
     got = stored(db, tf)
     assert [t for t, _ in got["plots"]] == [t for t, _ in batch.plots]  # type: ignore[attr-defined]
     assert [e["event_id"] for e in got["events"]] == [str(e.event_id) for e in batch.events]  # type: ignore[attr-defined]
+
+
+def test_restart_with_a_sliding_warmup_window_rewrites_overlays(
+    db: Engine, src: list[Bar], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart replays only the last WARMUP_SESSIONS, so zone ids restart from z1: the stored
+    outputs must be those of the replay, not a mix with the earlier window's rows."""
+    import nifty.collector.service as svc
+    import nifty.engines.balu  # noqa: F401
+
+    monkeypatch.setattr(svc, "WARMUP_SESSIONS", 1)
+    day2 = [b for b in src if CAL.session_date(b.bar_start_utc) == date(2026, 10, 27)]
+    cut = len(src) - len(day2) + 60
+
+    def balu(db: Engine) -> Pipeline:
+        p = Pipeline(db, None, CAL, Clock(), provider="csv")
+        p.add_feed(INS, {"pine.balu_zone": {}})
+        return p
+
+    feed(balu(db), src[:cut])
+    b = balu(db)  # restart: replays day 2 only
+    feed(b, src[cut - 1 :])
+    b.finish()
+    batch = run_batch(
+        "pine.balu_zone", {}, day2, "1m", instrument=INS, calendar=CAL, source_id=f"live:{DEMO_ID}"
+    )
+    with db.connect() as c:
+        rid = c.execute(text("select run_id from engine_runs where timeframe = '1m'")).scalar_one()
+        got = c.execute(
+            text("select id, ver, deleted, element->>'p0' from overlay_elements where run_id=:r order by ord"),
+            {"r": rid},
+        ).all()  # fmt: skip
+    want = [(o.id, o.ver, o.deleted, None if o.p0 is None else str(o.p0)) for o in batch.overlays]
+    assert len(want) > 0
+    assert [tuple(r) for r in got] == want

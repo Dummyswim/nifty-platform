@@ -41,6 +41,13 @@ def ensure_live_run(conn: Connection, run: LiveRun, instrument_id: str) -> str:
     return rid
 
 
+def clear_live_outputs(conn: Connection, run_id: str) -> None:
+    """A restart replays a sliding warm-up window, so overlay ids (zone seq) and ords restart and
+    would collide with the previous window's rows; the replay must replace them, not merge."""
+    for table in ("plot_points", "events", "overlay_elements"):
+        conn.execute(text(f"DELETE FROM {table} WHERE run_id = :r"), {"r": run_id})  # noqa: S608
+
+
 def append_delta(conn: Connection, run_id: str, d: LiveDelta) -> None:
     """Idempotent: every row has a key (bar start / event id / overlay id+ver)."""
     if d.plots:
