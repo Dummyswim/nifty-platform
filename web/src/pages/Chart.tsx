@@ -1,19 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
-import { ChartView, type Tool } from "../chart/ChartView";
+import type { InstrumentOut } from "../api/schemas";
+import { ChartPane } from "../chart/ChartPane";
+import type { Tool } from "../chart/ChartView";
 import { TFS, TF_LABEL, type Tf } from "../chart/geometry";
-import { activePane, useUi } from "../store";
 import { type ChartLayout, type PaneState, fromPrefs, toPrefs, updatePane } from "../chart/layout";
-import { useMemo, useState } from "react";
-import { EnginePanel } from "../indicators/EnginePanel";
-import { IndicatorPanel } from "../indicators/IndicatorPanel";
-import { useIndicators } from "../indicators/useIndicators";
 import { ReplayBar } from "../replay/ReplayBar";
 import { useReplay } from "../replay/store";
-import { banner } from "../live/messages";
-import { useLiveStream } from "../live/useLiveStream";
+import { activePane, useUi } from "../store";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "select", label: "Select" },
@@ -24,54 +19,33 @@ const TOOLS: { id: Tool; label: string }[] = [
 ];
 
 export function Chart() {
-  const { chart, restored, focus, set, setChart } = useUi();
+  const { chart, restored, set, setChart } = useUi();
   const { symbol, tf } = activePane({ chart });
-  const cursor = useReplay((r) => r.cursor);
   const [live, setLive] = useState(false);
   // indicator settings live in a sidebar next to the chart (never over the candles); remembered per browser
   const [showInd, setShowInd] = useState(() => { try { return localStorage.getItem("nifty.indicators.open") !== "0"; } catch { return true; } });
   const toggleInd = () => setShowInd((v) => { try { localStorage.setItem("nifty.indicators.open", v ? "0" : "1"); } catch { /* private mode */ } return !v; });
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
-  const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
-  const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
-  const ind = useIndicators(symbol, tf, live && iid ? { source: `live:${iid}`, version: ver } : null);
   const [times, setTimes] = useState<number[]>([]);
-  const overlays = useMemo(() => [...ind.overlays, ...(focus?.extra ?? [])], [ind.overlays, focus]);
-  const qc = useQueryClient();
   const [tool, setTool] = useState<Tool>("select");
+  // portal targets for the active pane's sidebar, engine cards and live banner
+  const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null);
+  const [cardsSlot, setCardsSlot] = useState<HTMLElement | null>(null);
+  const [bannerSlot, setBannerSlot] = useState<HTMLElement | null>(null);
 
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
-  const key = ["drawings", symbol];
-  const drawings = useQuery({ queryKey: key, queryFn: () => api<DrawingOut[]>(`/drawings?symbol=${encodeURIComponent(symbol)}`) });
 
-  // restore the last symbol / timeframe once
+  // restore the last layout (or the old single symbol / timeframe) once
   useEffect(() => {
     if (restored || !prefs.isSuccess) return;
     set({ restored: true, chart: fromPrefs(prefs.data["chart_layout"], prefs.data["chart"], { symbol, tf }) });
   }, [prefs.isSuccess, prefs.data, restored, set, symbol, tf]);
 
-  const sub = useLiveStream({ instrument: symbol, timeframe: tf, engines: ind.enabledIds, enabled: live });
-  useEffect(() => setVer(sub.version), [sub.version]);
-  const bn = banner(sub.state, sub.socket);
   const savePrefs = (l: ChartLayout) => {
     const p = toPrefs(l);
     void api(`/prefs/chart_layout`, { method: "PUT", body: { value: p.chart_layout } });
     void api(`/prefs/chart`, { method: "PUT", body: { value: p.chart } });
   };
-
-  const create = useMutation({
-    mutationFn: (v: { kind: DrawingKind; data: DrawingData }) => api<DrawingOut>("/drawings", { body: { symbol, kind: v.kind, data: v.data } }),
-    onSuccess: (d) => qc.setQueryData<DrawingOut[]>(key, (old) => [...(old ?? []), d]),
-  });
-  const update = useMutation({
-    mutationFn: (v: { id: string; data: DrawingData }) => api(`/drawings/${v.id}`, { method: "PUT", body: v.data }),
-    onMutate: (v) => qc.setQueryData<DrawingOut[]>(key, (old) => (old ?? []).map((d) => (d.id === v.id ? { ...d, data: v.data } : d))),
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => api(`/drawings/${id}`, { method: "DELETE" }),
-    onMutate: (id) => qc.setQueryData<DrawingOut[]>(key, (old) => (old ?? []).filter((d) => d.id !== id)),
-  });
-
   const pick = (next: Partial<{ symbol: string; tf: Tf }>) => {
     const patch: Partial<PaneState> = next.symbol ? { ...next, kind: "index", label: undefined } : next;
     const l = updatePane(chart, chart.active, patch);
@@ -117,37 +91,27 @@ export function Chart() {
           ))}
         </div>
       </div>
-      {live && (
-        <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
-          {bn.text}
-          {bn.connectKite && <button className="ghost" onClick={() => useUi.getState().set({ page: "settings" })}>Connect Kite</button>}
-        </div>
-      )}
+      <div className="slot" ref={setBannerSlot} />
       <div className="chart-row">
-      {ready && (
-        <ChartView
-          symbol={symbol}
-          tf={tf}
-          tool={tool}
-          drawings={drawings.data ?? []}
-          onCreate={(kind, data) => create.mutate({ kind, data })}
-          onUpdate={(id, data) => update.mutate({ id, data })}
-          onDelete={(id) => remove.mutate(id)}
-          onToolDone={() => setTool("select")}
-          plots={ind.layers}
-          overlays={overlays}
-          overlayColors={ind.colors}
-          cursor={cursor}
-          focus={focus}
-          onTimes={setTimes}
-          liveBars={live ? sub.bars : null}
-        />
-      )}
-      {showInd && <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />}
+        {ready && chart.panes.map((pane, i) => (
+          <ChartPane
+            key={i}
+            index={i}
+            pane={pane}
+            active={i === chart.active}
+            live={live}
+            tool={tool}
+            onActivate={() => { if (i !== chart.active) setChart({ ...chart, active: i }); }}
+            onToolDone={() => setTool("select")}
+            {...(i === chart.active ? { onTimes: setTimes } : {})}
+            sidebarSlot={showInd ? sidebarSlot : null}
+            cardsSlot={cardsSlot}
+            bannerSlot={bannerSlot}
+          />
+        ))}
+        <div className="slot" ref={setSidebarSlot} />
       </div>
-      <div className="cards">
-        {ind.panels.map((p) => <EnginePanel key={p.engine.id} id={p.engine.id} panel={p.panel} atEnd={cursor === null} />)}
-      </div>
+      <div className="cards" ref={setCardsSlot} />
     </div>
   );
 }
