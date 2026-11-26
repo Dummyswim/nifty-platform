@@ -19,7 +19,7 @@ import { api } from "../api/client";
 import type { BarsOut, DrawingData, DrawingKind, DrawingOut } from "../api/schemas";
 import {
   type Cols, type Hit, type Pt, type Tf, type TP,
-  fmtIst, hitTest, logicalToTime, mergeCols, movePoints, tickLabel, timeToLogical,
+  bucketTime, fmtIst, hitTest, logicalToTime, mergeCols, movePoints, tickLabel, timeToLogical,
 } from "./geometry";
 import { type DrawItem, DrawingsPrimitive } from "./primitives";
 import { type PlotLayer, bandFills, revealPlot, splitRuns } from "../overlay/layers";
@@ -51,6 +51,11 @@ export interface ChartViewProps {
   onTimes?: (times: number[]) => void;
   /** live bars from the WebSocket (replace-by-time); provisional candles are drawn hollow */
   liveBars?: { seq: number; data: LiveBars; provisional: boolean } | null;
+  /** another pane's crosshair time: shown here on the bar containing it (null = clear,
+   *  undefined = this pane is the one being hovered: leave its crosshair alone) */
+  syncTime?: number | null | undefined;
+  /** the user's crosshair time over this chart (null when the pointer leaves) */
+  onCrosshairTime?: (t: number | null) => void;
 }
 
 const PAGE = 5000;
@@ -68,6 +73,7 @@ const FUTURE_BARS = 30;
 export function ChartView({
   symbol, tf, tool, drawings, onCreate, onUpdate, onDelete, onToolDone,
   plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes, liveBars = null,
+  syncTime, onCrosshairTime,
 }: ChartViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -79,6 +85,8 @@ export function ChartView({
   const plotSeries = useRef(new Map<string, ISeriesApi<"Line" | "Area" | "Histogram">>());
   const onTimesRef = useRef(onTimes);
   onTimesRef.current = onTimes;
+  const onHoverRef = useRef(onCrosshairTime);
+  onHoverRef.current = onCrosshairTime;
   const cursorRef = useRef<number | null>(cursor);
   cursorRef.current = cursor;
   const cols = useRef<Cols>({ t: [], o: [], h: [], l: [], c: [], v: [] });
@@ -126,6 +134,8 @@ export function ChartView({
     chartRef.current = chart;
     candleRef.current = series;
     const onMove = (p: MouseEventParams<Time>) => {
+      // only user moves carry a sourceEvent; setCrosshairPosition (pane sync) must not echo back
+      if (p.sourceEvent) onHoverRef.current?.(p.time === undefined ? null : (p.time as number));
       const d = p.seriesData.get(series) as CandlestickData<Time> | undefined;
       if (!d || p.time === undefined) return setLegend(null);
       const i = cols.current.t.indexOf(p.time as number);
@@ -365,6 +375,15 @@ export function ChartView({
       refresh();
     }
   };
+  // crosshair follows another pane's time (on the bar containing it)
+  useEffect(() => {
+    const chart = chartRef.current, series = candleRef.current;
+    if (!chart || !series || syncTime === undefined) return;
+    const t = syncTime === null ? null : bucketTime(cols.current.t, syncTime);
+    if (t === null) return chart.clearCrosshairPosition();
+    chart.setCrosshairPosition(cols.current.c[cols.current.t.indexOf(t)]!, t as Time, series);
+  }, [syncTime]);
+
   const onMove = (e: React.PointerEvent) => {
     const pt = local(e);
     if (draft.current) {

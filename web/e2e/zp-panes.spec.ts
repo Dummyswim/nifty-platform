@@ -42,6 +42,16 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   await expect(panes.nth(2).getByTestId("chart")).toHaveAttribute("data-tf", "5m");
   await expect(panes.nth(0).getByTestId("chart")).toHaveAttribute("data-tf", "1m");
 
+  // crosshair sync: hovering pane A puts pane B's crosshair (and legend) on the same 1m bar
+  const legendTime = async (i: number) => ((await panes.nth(i).getByTestId("legend").innerText()).split(" O ")[0] ?? "").replace(/^.*· \w+\s*/, "");
+  const pa = (await panes.nth(0).boundingBox())!;
+  // left part of the pane: the right ~250 px are future whitespace and the price scale
+  await page.mouse.move(pa.x + pa.width * 0.3, pa.y + pa.height * 0.5);
+  await expect.poll(() => legendTime(0)).not.toBe("");
+  await expect.poll(() => legendTime(1)).toBe(await legendTime(0));
+  await page.mouse.move(pa.x + pa.width * 0.2, pa.y + pa.height * 0.5);
+  await expect.poll(() => legendTime(1)).toBe(await legendTime(0));
+
   // drag the column divider 100 px right: the left pane grows
   const div = (await page.getByTestId("divider-col").boundingBox())!;
   await page.mouse.move(div.x + div.width / 2, div.y + div.height / 2);

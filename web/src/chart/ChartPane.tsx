@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { create } from "zustand";
 import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
 import { EnginePanel } from "../indicators/EnginePanel";
@@ -27,14 +28,17 @@ export interface ChartPaneProps {
   sidebarSlot: HTMLElement | null;
   cardsSlot: HTMLElement | null;
   bannerSlot: HTMLElement | null;
-  syncTime?: number | null;
-  onCrosshairTime?: (t: number | null) => void;
 }
+
+/** The pane the pointer is over and its crosshair time; the other panes follow it. A pane's
+ *  "pointer left" only resets it when that pane still owns it (leave can arrive after the next pane's move). */
+const useHover = create<{ t: number | null; from: number }>(() => ({ t: null, from: -1 }));
 
 /** One chart: its own instrument, timeframe, drawings, indicators and live stream. */
 export function ChartPane(p: ChartPaneProps) {
   const { symbol, tf } = p.pane;
   const focus = useUi((s) => s.focus);
+  const syncTime = useHover((h) => (h.from === p.index ? undefined : h.t));
   const cursor = useReplay((r) => r.cursor);
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
@@ -80,6 +84,8 @@ export function ChartPane(p: ChartPaneProps) {
         focus={myFocus}
         {...(p.onTimes ? { onTimes: p.onTimes } : {})}
         liveBars={p.live ? sub.bars : null}
+        syncTime={syncTime}
+        onCrosshairTime={(t) => useHover.setState((h) => (t === null && h.from !== p.index ? h : { t, from: p.index }))}
       />
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>

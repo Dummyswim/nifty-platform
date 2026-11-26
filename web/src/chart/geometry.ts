@@ -181,3 +181,15 @@ export function logicalX(lg: number, toX: (i: number) => number | null): number 
   const c1 = toX(i + 1);
   return c1 === null ? c0 : c0 + f * (c1 - c0);
 }
+
+/** Start of the bar in `times` (ascending) that contains `t`: the last start <= t; null before the first. */
+export function bucketTime(times: number[], t: number): number | null {
+  let lo = 0;
+  let hi = times.length - 1;
+  let hit: number | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid]! <= t) { hit = times[mid]!; lo = mid + 1; } else hi = mid - 1;
+  }
+  return hit;
+}
