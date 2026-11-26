@@ -21,7 +21,10 @@ free-hand resizing.
 ## Non-goals (this piece)
 - Sensex (next piece). Historical option candles from Kite (later; user chose "recorded live" first).
 - Visual restyle (third piece). More than 3 panes, stacked top/bottom 2-pane, free grid layouts.
-- Backend/schema changes: none needed (see Constraints).
+- Schema changes: none. One small backend fix (found while planning): engine-run job keys ignore the
+  data, so a resubmit after new bars returned the stale run. The key now includes the symbol's latest
+  bar time (`data_until`). Needed for live option-pane indicators; also fixes stale History-mode
+  indicators after a backfill.
 
 ## Anti-goals (fail even if it "works")
 - The single-pane chart behaves differently from today (indicators, replay, live, drawings,
