@@ -74,9 +74,19 @@ Pointer drag, min 15 % per pane, double-click resets to equal. Charts resize liv
 CE/PE. Contracts not recorded are shown but marked "not recorded"; choosing one opens an empty pane with
 that note. The pane title shows the contract (e.g. `NIFTY 26DEC 25800 CE · 1m`).
 
-**Indicators:** settings stay global as today. Index panes run the enabled engines as today. Option panes
-show candles (and volume) only. *(Builder's/Claude's call: the engines are written for the index with a
-futures volume proxy; running them on option premiums is a separate decision.)*
+**Indicators (user decision: on every pane, index and option, same indicators).** Settings stay global as
+today; every pane runs the enabled engines on its own instrument and timeframe.
+- History mode: unchanged path (`engine_run` job on the pane's stored 1m bars, `worker/handlers.py:21`).
+  Recorded option bars are stored like index bars, so this works for contracts with no backend change.
+- Live mode, index pane: the collector's live run, as today.
+- Live mode, option pane: the collector runs no engines for options (`collector/kite_run.py:127`), and
+  running them for every recorded contract × timeframe would be heavy. Instead the pane uses the History
+  path and re-runs it when its stream delivers a finalized bar (`wake`). Small: a contract has a few
+  hundred recorded 1m bars per day. Provisional (forming-bar) indicator values are index-only.
+- Options carry real traded volume (the index has none: it uses the futures proxy live and TWAP in
+  history). Engines already honour `volume_kind`, so on option panes VWAP / flow use real volume
+  automatically. Other option data worth using later is in `docs/TODO.md`.
+- An option with too few recorded bars for an engine's warm-up shows the engine's normal warm-up state.
 
 **Engine cards and Indicators sidebar** show the active pane's engines.
 
