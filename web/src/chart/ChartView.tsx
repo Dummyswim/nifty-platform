@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { BarsOut, DrawingData, DrawingKind, DrawingOut } from "../api/schemas";
+import { nextHover, useHover } from "./hover";
 import {
   type Cols, type Hit, type Pt, type Tf, type TP,
   bucketTime, fmtIst, hitTest, logicalToTime, mergeCols, movePoints, tickLabel, timeToLogical,
@@ -51,11 +52,10 @@ export interface ChartViewProps {
   onTimes?: (times: number[]) => void;
   /** live bars from the WebSocket (replace-by-time); provisional candles are drawn hollow */
   liveBars?: { seq: number; data: LiveBars; provisional: boolean } | null;
-  /** another pane's crosshair time: shown here on the bar containing it (null = clear,
-   *  undefined = this pane is the one being hovered: leave its crosshair alone) */
-  syncTime?: number | null | undefined;
-  /** the user's crosshair time over this chart (null when the pointer leaves) */
-  onCrosshairTime?: (t: number | null) => void;
+  /** this chart's pane index: its crosshair is shared with the other panes (undefined = no sync) */
+  syncIndex?: number | undefined;
+  /** Delete/Escape act on this chart's selected drawing (false: another pane is active) */
+  keysEnabled?: boolean;
   /** legend name (e.g. an option's "NIFTY 29DEC 25800 CE"); default: symbol */
   title?: string | undefined;
 }
@@ -75,7 +75,7 @@ const FUTURE_BARS = 30;
 export function ChartView({
   symbol, tf, tool, drawings, onCreate, onUpdate, onDelete, onToolDone,
   plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes, liveBars = null,
-  syncTime, onCrosshairTime, title,
+  syncIndex, keysEnabled = true, title,
 }: ChartViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -87,8 +87,10 @@ export function ChartView({
   const plotSeries = useRef(new Map<string, ISeriesApi<"Line" | "Area" | "Histogram">>());
   const onTimesRef = useRef(onTimes);
   onTimesRef.current = onTimes;
-  const onHoverRef = useRef(onCrosshairTime);
-  onHoverRef.current = onCrosshairTime;
+  const syncRef = useRef(syncIndex);
+  syncRef.current = syncIndex;
+  const keysRef = useRef(keysEnabled);
+  keysRef.current = keysEnabled;
   const cursorRef = useRef<number | null>(cursor);
   cursorRef.current = cursor;
   const cols = useRef<Cols>({ t: [], o: [], h: [], l: [], c: [], v: [] });
@@ -137,7 +139,8 @@ export function ChartView({
     candleRef.current = series;
     const onMove = (p: MouseEventParams<Time>) => {
       // only user moves carry a sourceEvent; setCrosshairPosition (pane sync) must not echo back
-      if (p.sourceEvent) onHoverRef.current?.(p.time === undefined ? null : (p.time as number));
+      const me = syncRef.current;
+      if (p.sourceEvent && me !== undefined) useHover.setState((h) => nextHover(h, p.time === undefined ? null : (p.time as number), me));
       const d = p.seriesData.get(series) as CandlestickData<Time> | undefined;
       if (!d || p.time === undefined) return setLegend(null);
       const i = cols.current.t.indexOf(p.time as number);
@@ -316,6 +319,7 @@ export function ChartView({
   // delete key
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!keysRef.current) return;
       const tag = (e.target as HTMLElement).tagName;
       if ((e.key === "Delete" || e.key === "Backspace") && props.current.selected && tag !== "INPUT" && tag !== "TEXTAREA") {
         props.current.onDelete(props.current.selected);
@@ -377,14 +381,30 @@ export function ChartView({
       refresh();
     }
   };
-  // crosshair follows another pane's time (on the bar containing it)
+  // crosshair follows another pane's time (on the bar containing it). setCrosshairPosition fires no
+  // crosshairMove, so the legend is set here too; clearing restores the latest bar.
   useEffect(() => {
-    const chart = chartRef.current, series = candleRef.current;
-    if (!chart || !series || syncTime === undefined) return;
-    const t = syncTime === null ? null : bucketTime(cols.current.t, syncTime);
-    if (t === null) return chart.clearCrosshairPosition();
-    chart.setCrosshairPosition(cols.current.c[cols.current.t.indexOf(t)]!, t as Time, series);
-  }, [syncTime]);
+    if (syncIndex === undefined) return;
+    let synced = false;
+    const legendAt = (i: number) => {
+      const c = cols.current;
+      setLegend(i >= 0 ? { t: c.t[i]!, o: c.o[i]!, h: c.h[i]!, l: c.l[i]!, c: c.c[i]!, v: c.v[i]! } : null);
+    };
+    const apply = (h: { t: number | null; from: number }) => {
+      const chart = chartRef.current, series = candleRef.current;
+      if (!chart || !series || h.from === syncIndex) return; // the hovered pane draws its own crosshair
+      const t = h.t === null ? null : bucketTime(cols.current.t, h.t);
+      if (t === null) {
+        if (synced) { chart.clearCrosshairPosition(); legendAt(cols.current.t.length - 1); synced = false; }
+        return;
+      }
+      const i = cols.current.t.indexOf(t);
+      chart.setCrosshairPosition(cols.current.c[i]!, t as Time, series);
+      legendAt(i);
+      synced = true;
+    };
+    return useHover.subscribe(apply);
+  }, [syncIndex]);
 
   const onMove = (e: React.PointerEvent) => {
     const pt = local(e);
@@ -426,7 +446,10 @@ export function ChartView({
 
   const shown = legend;
   return (
-    <div className="chart-wrap">
+    <div className="chart-wrap" onPointerLeave={() => {
+      const me = syncRef.current;
+      if (me !== undefined) useHover.setState((h) => nextHover(h, null, me));
+    }}>
       <div
         ref={box}
         className={`chart ${tool === "select" ? "" : "drawing"}`}

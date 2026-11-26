@@ -12,7 +12,7 @@ test("openOnChart changes only the active pane and goes to the chart", () => {
   useUi.getState().openOnChart({ symbol: "SENSEX", tf: "5m", focus });
   const s = useUi.getState();
   expect(s.page).toBe("chart");
-  expect(s.focus).toEqual(focus);
+  expect(s.focus).toEqual({ ...focus, pane: 2 });
   expect(s.chart.panes[2]).toEqual({ symbol: "SENSEX", tf: "5m", kind: "index" });
   expect(s.chart.panes.slice(0, 2).map((p) => [p.symbol, p.tf])).toEqual([["NIFTY 50", "1m"], ["NIFTY 50", "1m"]]);
   expect(activePane(s).symbol).toBe("SENSEX");
@@ -28,4 +28,17 @@ test("indexSymbol skips option panes", () => {
   expect(indexSymbol({ chart: { ...two, active: 1 } })).toBe("NIFTY 50");
   expect(indexSymbol({ chart: updatePane(defaultLayout("X", "1m"), 0, { kind: "option" }) })).toBe("NIFTY 50");
   expect(indexSymbol({ chart: defaultLayout("SENSEX", "1m") })).toBe("SENSEX");
+});
+
+test("open-on-chart focus belongs to the pane it was opened in", () => {
+  useUi.setState({ chart: { ...setLayoutN(defaultLayout("NIFTY 50", "1m"), 3), active: 2 } });
+  useUi.getState().openOnChart({ symbol: "NIFTY 50", tf: "5m", focus });
+  expect(useUi.getState().focus?.pane).toBe(2);
+});
+
+test("open-on-chart without a symbol never draws index markers on an option pane", () => {
+  const two = updatePane(setLayoutN(defaultLayout("NIFTY 50", "1m"), 2), 1, { symbol: "OPT", kind: "option", label: "OPT CE" });
+  useUi.setState({ chart: { ...two, active: 1 } });
+  useUi.getState().openOnChart({ tf: "1m", focus });
+  expect(activePane(useUi.getState())).toEqual({ symbol: "NIFTY 50", tf: "1m", kind: "index" });
 });

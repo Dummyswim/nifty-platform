@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, text
 
 from nifty.db.backtests import BacktestError, resolve_input, run_backtest
 from nifty.db.runs import persist_run
@@ -33,7 +33,26 @@ def engine_run(conn: Connection, payload: dict[str, Any]) -> str:
         payload.get("timeframe") or spec.cls.default_timeframe,
         instrument=ins, calendar=cal, source_id=snapshot_id,
     )  # fmt: skip
-    return persist_run(conn, r)[0]
+    run_id = persist_run(conn, r)[0]
+    if ins.instrument_type in ("CE", "PE"):
+        prune_superseded(conn, run_id)
+    return run_id
+
+
+def prune_superseded(conn: Connection, run_id: str) -> int:
+    """Delete older runs of the same instrument + engine + params + timeframe (any other source).
+    Option panes in Live re-run on every finalized bar; only the newest run is ever read again.
+    Runs a backtest points at are kept (no cascade there)."""
+    return conn.execute(
+        text(
+            "DELETE FROM engine_runs o USING engine_runs n "
+            "WHERE n.run_id = :r AND o.run_id <> n.run_id "
+            "AND o.instrument_id = n.instrument_id AND o.engine_id = n.engine_id "
+            "AND o.config_hash = n.config_hash AND o.timeframe = n.timeframe "
+            "AND NOT EXISTS (SELECT 1 FROM backtests b WHERE b.run_id = o.run_id)"
+        ),
+        {"r": run_id},
+    ).rowcount
 
 
 def research_run(conn: Connection, payload: dict[str, Any]) -> str:

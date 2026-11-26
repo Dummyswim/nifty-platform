@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "../api/client";
 import type { EngineOut, EventsOut, JobOut, OverlaysOut, PlotsOut, SubmitOut } from "../api/schemas";
@@ -80,6 +80,8 @@ export function useIndicators(symbol: string, chartTf: string, live: { source: s
         ? () => api<PlotsOut>(`/plots?engine_id=${e.id}&snapshot_id=${encodeURIComponent(live.source)}&timeframe=${engineTf(e, chartTf)}`).then((p) => p.run_id)
         : () => runEngine(e, symbol, runKey(e), engineTf(e, chartTf)),
       staleTime: Infinity,
+      // a refresh (option pane in Live) keeps showing the previous run while the new one computes
+      ...(refresh > 0 ? { placeholderData: keepPreviousData } : {}),
     })),
   });
   const ready = active.map((e, i) => ({ e, runId: runs[i]?.data }));
@@ -90,6 +92,7 @@ export function useIndicators(symbol: string, chartTf: string, live: { source: s
         queryFn: () => api<PlotsOut | EventsOut | OverlaysOut>(`/${k}?run_id=${runId}`),
         enabled: !!runId,
         staleTime: Infinity,
+        ...(refresh > 0 ? { placeholderData: keepPreviousData } : {}),
       })),
     ),
   });

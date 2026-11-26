@@ -77,6 +77,9 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   await expect.poll(() => legendTime(1)).toBe(await legendTime(0));
   await page.mouse.move(pa.x + pa.width * 0.2, pa.y + pa.height * 0.5);
   await expect.poll(() => legendTime(1)).toBe(await legendTime(0));
+  const hovered = await legendTime(0);
+  await page.mouse.move(5, 5); // off the charts: pane B's synced crosshair is released
+  await expect.poll(() => legendTime(1)).not.toBe(hovered);
 
   // drag the column divider 100 px right: the left pane grows
   const div = (await page.getByTestId("divider-col").boundingBox())!;
@@ -113,4 +116,57 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   await expect(page.getByTestId("chart")).toHaveAttribute("data-tf", "1m");
   await page.waitForTimeout(500);
   expect(problems).toEqual([]);
+});
+
+test("replay steps the active pane's bars; Delete only acts in the active pane", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const panes = page.getByTestId("pane");
+  await page.getByTestId("layout-2").click();
+  await expect(panes).toHaveCount(2);
+  const [a, b] = [panes.nth(0).getByTestId("chart"), panes.nth(1).getByTestId("chart")];
+  await expect.poll(async () => Number(await a.getAttribute("data-bars"))).toBeGreaterThan(100);
+
+  // B on 5m (loads while active), then make A (1m) active: replay must step A's own 1m bars
+  await panes.nth(1).click({ position: { x: 40, y: 40 } });
+  await page.locator('button[data-tf="5m"]').click();
+  await expect(b).toHaveAttribute("data-tf", "5m");
+  await expect.poll(async () => Number(await b.getAttribute("data-bars"))).toBeGreaterThan(100);
+  await panes.nth(0).click({ position: { x: 40, y: 40 } });
+  await page.getByLabel("Jump to (IST)").fill("2026-10-27T12:30");
+  await page.getByRole("button", { name: "Go" }).click();
+  await expect(page.getByTestId("replay-badge")).toBeVisible();
+  // the jump loads older pages first: wait until the shown count settles
+  let shown = -1;
+  await expect.poll(async () => {
+    const before = Number(await a.getAttribute("data-shown"));
+    await page.waitForTimeout(400);
+    const after = Number(await a.getAttribute("data-shown"));
+    shown = after;
+    return before === after && after > 1;
+  }).toBe(true);
+  await page.getByRole("button", { name: "Step forward" }).click();
+  await expect(a).toHaveAttribute("data-shown", String(shown + 1)); // one 1m bar, not a 5m jump
+  await page.getByRole("button", { name: "Exit replay" }).click();
+
+  // a selected drawing in A survives Delete pressed while B is active
+  await page.locator('button[data-tool="hline"]').click();
+  const box = (await a.boundingBox())!;
+  const at = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.4 };
+  await page.mouse.click(at.x, at.y);
+  await expect(a).toHaveAttribute("data-drawings", "1");
+  await page.mouse.click(at.x, at.y); // select it
+  await panes.nth(1).click({ position: { x: 40, y: 40 } });
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(300);
+  await expect(a).toHaveAttribute("data-drawings", "1");
+  await panes.nth(0).click({ position: { x: 40, y: 40 } });
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.press("Delete");
+  await expect(a).toHaveAttribute("data-drawings", "0");
+
+  await page.getByTestId("layout-1").click();
+  await expect(panes).toHaveCount(1);
+  await page.waitForTimeout(500);
 });

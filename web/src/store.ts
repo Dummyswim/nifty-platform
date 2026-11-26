@@ -12,6 +12,8 @@ export interface Focus {
   nonce: number;
   tf: Tf;
   extra: El[];
+  /** the pane it was opened in (set by openOnChart); other panes ignore it */
+  pane?: number;
 }
 
 interface Ui {
@@ -24,7 +26,7 @@ interface Ui {
   set: (p: Partial<Omit<Ui, "set" | "setChart" | "openOnChart">>) => void;
   setChart: (l: ChartLayout) => void;
   /** Backtests/Research "Open on chart": the active pane shows the symbol/tf and scrolls to `focus` */
-  openOnChart: (o: { symbol?: string; tf: Tf; focus: Focus }) => void;
+  openOnChart: (o: { symbol?: string; tf: Tf; focus: Omit<Focus, "pane"> }) => void;
 }
 
 export const activePane = (s: Pick<Ui, "chart">): PaneState => s.chart.panes[s.chart.active] ?? s.chart.panes[0]!;
@@ -46,9 +48,11 @@ export const useUi = create<Ui>((set) => ({
   setChart: (chart) => set({ chart }),
   openOnChart: ({ symbol, tf, focus }) =>
     set((s) => {
-      const patch: Partial<PaneState> = symbol ? { symbol, tf, kind: "index" } : { tf };
+      // backtest/research markers are index trades: never draw them on an option contract
+      const sym = symbol ?? (activePane(s).kind === "option" ? indexSymbol(s) : undefined);
+      const patch: Partial<PaneState> = sym ? { symbol: sym, tf, kind: "index" } : { tf };
       const chart = updatePane(s.chart, s.chart.active, patch);
-      if (symbol) delete chart.panes[s.chart.active]!.label;
-      return { page: "chart", focus, chart };
+      if (sym) delete chart.panes[s.chart.active]!.label;
+      return { page: "chart", focus: { ...focus, pane: s.chart.active }, chart };
     }),
 }));

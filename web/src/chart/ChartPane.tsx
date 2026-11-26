@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { create } from "zustand";
 import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
 import { EnginePanel } from "../indicators/EnginePanel";
@@ -31,15 +30,11 @@ export interface ChartPaneProps {
   bannerSlot: HTMLElement | null;
 }
 
-/** The pane the pointer is over and its crosshair time; the other panes follow it. A pane's
- *  "pointer left" only resets it when that pane still owns it (leave can arrive after the next pane's move). */
-const useHover = create<{ t: number | null; from: number }>(() => ({ t: null, from: -1 }));
 
 /** One chart: its own instrument, timeframe, drawings, indicators and live stream. */
 export function ChartPane(p: ChartPaneProps) {
   const { symbol, tf } = p.pane;
   const focus = useUi((s) => s.focus);
-  const syncTime = useHover((h) => (h.from === p.index ? undefined : h.t));
   const cursor = useReplay((r) => r.cursor);
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
@@ -49,15 +44,18 @@ export function ChartPane(p: ChartPaneProps) {
   const isOption = p.pane.kind === "option";
   const ind = useIndicators(symbol, tf, p.live && iid && !isOption ? { source: `live:${iid}`, version: ver } : null, isOption ? finalized : 0);
   const [nBars, setNBars] = useState(-1);
-  const myFocus = p.active ? focus : null;
+  const myFocus = focus && focus.pane === p.index ? focus : null;
   const overlays = useMemo(() => [...ind.overlays, ...(myFocus?.extra ?? [])], [ind.overlays, myFocus]);
   const sub = useLiveStream({ instrument: symbol, timeframe: tf, engines: ind.enabledIds, enabled: p.live });
   useEffect(() => setVer(sub.version), [sub.version]);
   useEffect(() => {
     if (isOption && sub.bars && !sub.bars.provisional) setFinalized((n) => n + 1);
   }, [isOption, sub.bars]);
+  // the replay bar steps the active pane's bars: hand them over whenever this pane becomes active
   const onTimes = p.onTimes;
-  const reportTimes = (t: number[]) => { setNBars(t.length); onTimes?.(t); };
+  const lastTimes = useRef<number[]>([]);
+  const reportTimes = (t: number[]) => { lastTimes.current = t; setNBars(t.length); onTimes?.(t); };
+  useEffect(() => { if (p.active) onTimes?.(lastTimes.current); }, [p.active, onTimes]);
   const note = nBars < 0 ? null : paneNote(p.pane.kind, nBars);
   const bn = banner(sub.state, sub.socket);
 
@@ -96,8 +94,8 @@ export function ChartPane(p: ChartPaneProps) {
         onTimes={reportTimes}
         title={p.pane.label}
         liveBars={p.live ? sub.bars : null}
-        syncTime={syncTime}
-        onCrosshairTime={(t) => useHover.setState((h) => (t === null && h.from !== p.index ? h : { t, from: p.index }))}
+        syncIndex={p.index}
+        keysEnabled={p.active}
       />
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
