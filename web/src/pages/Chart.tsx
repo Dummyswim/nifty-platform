@@ -4,7 +4,8 @@ import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
 import { ChartView, type Tool } from "../chart/ChartView";
 import { TFS, TF_LABEL, type Tf } from "../chart/geometry";
-import { useUi } from "../store";
+import { activePane, useUi } from "../store";
+import { type ChartLayout, type PaneState, fromPrefs, toPrefs, updatePane } from "../chart/layout";
 import { useMemo, useState } from "react";
 import { EnginePanel } from "../indicators/EnginePanel";
 import { IndicatorPanel } from "../indicators/IndicatorPanel";
@@ -23,7 +24,8 @@ const TOOLS: { id: Tool; label: string }[] = [
 ];
 
 export function Chart() {
-  const { symbol, tf, restored, focus, set } = useUi();
+  const { chart, restored, focus, set, setChart } = useUi();
+  const { symbol, tf } = activePane({ chart });
   const cursor = useReplay((r) => r.cursor);
   const [live, setLive] = useState(false);
   // indicator settings live in a sidebar next to the chart (never over the candles); remembered per browser
@@ -45,15 +47,17 @@ export function Chart() {
   // restore the last symbol / timeframe once
   useEffect(() => {
     if (restored || !prefs.isSuccess) return;
-    const p = prefs.data["chart"] as { symbol?: string; tf?: Tf } | undefined;
-    set({ restored: true, ...(p?.symbol ? { symbol: p.symbol } : {}), ...(p?.tf && TFS.includes(p.tf) ? { tf: p.tf } : {}) });
-  }, [prefs.isSuccess, prefs.data, restored, set]);
+    set({ restored: true, chart: fromPrefs(prefs.data["chart_layout"], prefs.data["chart"], { symbol, tf }) });
+  }, [prefs.isSuccess, prefs.data, restored, set, symbol, tf]);
 
   const sub = useLiveStream({ instrument: symbol, timeframe: tf, engines: ind.enabledIds, enabled: live });
   useEffect(() => setVer(sub.version), [sub.version]);
   const bn = banner(sub.state, sub.socket);
-  const savePref = (next: { symbol: string; tf: Tf }) =>
-    void api(`/prefs/chart`, { method: "PUT", body: { value: next } });
+  const savePrefs = (l: ChartLayout) => {
+    const p = toPrefs(l);
+    void api(`/prefs/chart_layout`, { method: "PUT", body: { value: p.chart_layout } });
+    void api(`/prefs/chart`, { method: "PUT", body: { value: p.chart } });
+  };
 
   const create = useMutation({
     mutationFn: (v: { kind: DrawingKind; data: DrawingData }) => api<DrawingOut>("/drawings", { body: { symbol, kind: v.kind, data: v.data } }),
@@ -69,9 +73,10 @@ export function Chart() {
   });
 
   const pick = (next: Partial<{ symbol: string; tf: Tf }>) => {
-    const n = { symbol, tf, ...next };
-    set(n);
-    savePref(n);
+    const patch: Partial<PaneState> = next.symbol ? { ...next, kind: "index", label: undefined } : next;
+    const l = updatePane(chart, chart.active, patch);
+    setChart(l);
+    savePrefs(l);
   };
 
   // when a trading symbol is ambiguous (csv and kite NIFTY 50) the options carry instrument ids

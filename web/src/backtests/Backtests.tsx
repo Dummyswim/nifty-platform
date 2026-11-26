@@ -5,7 +5,7 @@ import type { BacktestOut, BacktestRow, EngineOut, JobOut, SubmitOut, TradeOut }
 import { FieldInput } from "../indicators/IndicatorPanel";
 import { type Values, coerce, defaultsOf, paramsForRun } from "../indicators/schemaForm";
 import { fieldsOf } from "../indicators/useIndicators";
-import { useUi } from "../store";
+import { indexSymbol, useUi } from "../store";
 import { AuditDrawer } from "./AuditDrawer";
 import { MetricCards } from "./Metrics";
 import { type Filters, NO_FILTER, type SortKey, filterTrades, reasonsOf, sortTrades } from "./tradeTable";
@@ -167,7 +167,8 @@ function Detail({ id }: { id: string }) {
 }
 
 export function Backtests() {
-  const { symbol, backtestId, set } = useUi();
+  const { backtestId, set } = useUi();
+  const symbol = useUi(indexSymbol);
   const qc = useQueryClient();
   const engines = useQuery({ queryKey: ["engines"], queryFn: () => api<EngineOut[]>("/engines") });
   const list = useQuery({ queryKey: ["backtests"], queryFn: () => api<BacktestRow[]>("/backtests") });
