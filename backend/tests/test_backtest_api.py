@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -151,3 +152,25 @@ def test_api_requires_login(client: TestClient) -> None:
         assert client.get(path).status_code == 401
     assert client.post("/api/v1/backtests", json=BT).status_code == 401
     assert json is not None and Path is not None
+
+
+def test_engine_run_reruns_after_new_bars(api: tuple[TestClient, Engine]) -> None:
+    c, eng = api
+    H = {"Origin": ORIGIN}
+    c.post(f"/api/v1/datasets/import?symbol={SYMBOL}&tick_size=0.05", content=ORACLE.read_bytes(),
+           headers={**H, "Content-Type": "text/csv"})  # fmt: skip
+    body = {"symbol": SYMBOL, "timeframe": "5m"}
+    first = c.post("/api/v1/engines/pine.nvs_scalper/run", json=body, headers=H).json()
+    again = c.post("/api/v1/engines/pine.nvs_scalper/run", json=body, headers=H).json()
+    assert again["job_id"] == first["job_id"]  # same data: the cached run
+    with eng.connect() as conn:
+        iid = conn.execute(
+            text("SELECT instrument_id FROM instruments WHERE tradingsymbol = :s"), {"s": SYMBOL}
+        ).scalar_one()
+    last = parse_csv(ORACLE, instrument_id=iid)[-1]
+    nxt = last.model_copy(update={"bar_start_utc": last.bar_start_utc + timedelta(minutes=1),
+                                  "bar_end_utc": last.bar_end_utc + timedelta(minutes=1)})  # fmt: skip
+    with eng.begin() as conn:
+        upsert_bars(conn, [nxt])
+    fresh = c.post("/api/v1/engines/pine.nvs_scalper/run", json=body, headers=H).json()
+    assert fresh["job_id"] != first["job_id"]  # a newer bar exists: a new run
