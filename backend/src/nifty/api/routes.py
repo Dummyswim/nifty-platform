@@ -13,7 +13,8 @@ from nifty.analytics.export import to_csv, to_json, to_xlsx
 from nifty.api.auth import check_origin, require_user
 from nifty.contracts import EngineEvent, OverlayElement, PlotSpec, TradeRecord
 from nifty.db import backtests as bt
-from nifty.db.instruments import upsert_instrument
+from nifty.db.bars import latest_bar_start
+from nifty.db.instruments import find_instrument, upsert_instrument
 from nifty.db.jobs import get_job, submit_job
 from nifty.db.runs import load_events, load_overlays, load_plots
 from nifty.db.session import get_engine
@@ -224,6 +225,11 @@ def engine_run(engine_id: str, body: RunIn) -> dict[str, Any]:
         raise HTTPException(404, f"engine {engine_id} not available") from e
     payload = {"engine_id": engine_id, **body.model_dump(exclude_none=True)}
     with _begin() as c:
+        if body.symbol and not body.snapshot_id:
+            # part of the job key: newer bars => a new run instead of the cached one
+            ins = find_instrument(c, body.symbol)
+            last = latest_bar_start(c, ins.instrument_id) if ins else None
+            payload["data_until"] = last.isoformat() if last else None
         jid, created = submit_job(c, "engine_run", payload)
         return _job_out(c, jid, created)
 

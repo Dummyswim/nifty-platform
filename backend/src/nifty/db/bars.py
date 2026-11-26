@@ -153,3 +153,11 @@ def create_snapshot(
         },
     )
     return Snapshot(sid, sha, len(bars), instrument_id, timeframe, from_utc, to_utc)
+
+
+def latest_bar_start(conn: Connection, instrument_id: str) -> datetime | None:
+    """Start of the newest stored bar of an instrument (any timeframe); None when it has none."""
+    v = conn.execute(
+        text("SELECT max(bar_start_utc) FROM bars WHERE instrument_id = :i"), {"i": instrument_id}
+    ).scalar()
+    return v if isinstance(v, datetime) else None
