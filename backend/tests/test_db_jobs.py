@@ -33,6 +33,25 @@ def test_same_key_returns_the_existing_job(db_conn: Connection) -> None:
     assert submit_job(db_conn, "engine_run", {"x": 1, "y": [2]})[0] != a  # kind is part of the key
 
 
+def test_resubmitting_a_failed_job_requeues_it(db_conn: Connection) -> None:
+    # e.g. an engine_run that failed with "unknown symbol" before data was imported
+    j, _ = submit_job(db_conn, "engine_run", {"symbol": "NIFTY 50"})
+    assert claim_job(db_conn) is not None
+    fail_job(db_conn, j, "BacktestError: unknown symbol; import data first")
+    again, created = submit_job(db_conn, "engine_run", {"symbol": "NIFTY 50"})
+    got = get_job(db_conn, j)
+    assert (again, created) == (j, True)
+    assert got and (got["status"], got["error"], got["attempts"]) == ("queued", None, 0)
+
+
+def test_resubmitting_a_done_job_keeps_its_result(db_conn: Connection) -> None:
+    j, _ = submit_job(db_conn, "engine_run", {"n": 4})
+    finish_job(db_conn, j, "run_1")
+    assert submit_job(db_conn, "engine_run", {"n": 4}) == (j, False)
+    got = get_job(db_conn, j)
+    assert got and (got["status"], got["result_ref"]) == ("done", "run_1")
+
+
 def test_failure_is_stored_short_and_empty_result_is_not_success(db_conn: Connection) -> None:
     j, _ = submit_job(db_conn, "backtest", {"n": 1})
     fail_job(db_conn, j, "E: " + "x" * 1000)

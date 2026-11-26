@@ -16,12 +16,15 @@ def job_key(kind: str, payload: dict[str, Any]) -> str:
 
 
 def submit_job(conn: Connection, kind: str, payload: dict[str, Any]) -> tuple[int, bool]:
-    """(job id, created). The same kind+payload returns the existing job (and its result)."""
+    """(job id, created). The same kind+payload returns the existing job (and its result); a
+    failed one is requeued instead, so a request that failed before (e.g. no data yet) can run."""
     key = job_key(kind, payload)
     row = conn.execute(
         text(
             "INSERT INTO jobs (kind, key, payload) VALUES (:k, :key, CAST(:p AS jsonb)) "
-            "ON CONFLICT (key) DO NOTHING RETURNING id"
+            "ON CONFLICT (key) DO UPDATE SET status = 'queued', attempts = 0, error = NULL, "
+            "result_ref = NULL, started_at = NULL, finished_at = NULL, heartbeat_at = NULL "
+            "WHERE jobs.status = 'failed' RETURNING id"
         ),
         {"k": kind, "key": key, "p": json.dumps(payload, default=str)},
     ).first()
