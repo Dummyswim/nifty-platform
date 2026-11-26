@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  type Cols, emptyCols, fmtIst, hitTest, logicalToTime, logicalX, mergeCols, movePoints, tickLabel, timeToLogical,
+  bucketTime, type Cols, emptyCols, fmtIst, hitTest, logicalToTime, logicalX, mergeCols, movePoints, tickLabel, timeToLogical,
 } from "./geometry";
 
 const T5 = [0, 300, 600, 900, 1200]; // 5m bars
@@ -82,4 +82,12 @@ test("logicalX interpolates fractions between whole bars", () => {
   expect(logicalX(99.005, toX)).toBeCloseTo(802.04); // a time in the overnight gap: just after the last bar, never 0
   expect(logicalX(100.5, toX)).toBe(810); // no right neighbour: the bar itself
   expect(logicalX(-1, toX)).toBeNull();
+});
+
+test("bucketTime: the bar containing a time from another pane", () => {
+  expect(bucketTime([0, 300, 600], 450)).toBe(300); // 1m time inside a 5m bar
+  expect(bucketTime([0, 300, 600], 600)).toBe(600);
+  expect(bucketTime([0, 300, 600], 9999)).toBe(600);
+  expect(bucketTime([0, 300, 600], -1)).toBeNull();
+  expect(bucketTime([], 5)).toBeNull();
 });

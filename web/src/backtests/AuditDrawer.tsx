@@ -10,7 +10,7 @@ import { auditOverlays } from "./audit";
 const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
 export function AuditDrawer({ bt, tradeId, onClose }: { bt: BacktestOut; tradeId: string; onClose: () => void }) {
-  const set = useUi((s) => s.set);
+  const openOnChart = useUi((s) => s.openOnChart);
   const audit = useQuery({
     queryKey: ["audit", bt.backtest_id, tradeId],
     queryFn: () => api<AuditOut>(`/backtests/${bt.backtest_id}/audit/${encodeURIComponent(tradeId)}?window=10`),
@@ -23,8 +23,8 @@ export function AuditDrawer({ bt, tradeId, onClose }: { bt: BacktestOut; tradeId
   const open = (replay: boolean) => {
     if (!a) return;
     const from = sec(a.trade.signal_bar_start ?? a.trade.entry_time);
-    set({
-      page: "chart", tf, ...(symbol ? { symbol } : {}),
+    openOnChart({
+      tf, ...(symbol ? { symbol } : {}),
       focus: { from, to: sec(a.trade.exit_time), nonce: Date.now(), tf, extra: auditOverlays(a) },
     });
     useReplay.setState({ cursor: replay ? from + TF_SEC[tf] : null, playing: false });

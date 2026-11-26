@@ -6,7 +6,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { EventsOut, JobOut, LabelOut, ResearchOut, ResearchRow, SubmitOut } from "../api/schemas";
-import { useUi } from "../store";
+import { indexSymbol, useUi } from "../store";
 import { type Cell, type Cond, ciOption, eventsNear, fmt, labelOverlays, labelText } from "./view";
 
 use([BarChart, CustomChart, ScatterChart, GridComponent, TooltipComponent, CanvasRenderer]);
@@ -83,7 +83,7 @@ function Conditions({ conds }: { conds: Cond[] }) {
 }
 
 function Drill({ run, cell }: { run: ResearchOut; cell: Cell }) {
-  const set = useUi((s) => s.set);
+  const openOnChart = useUi((s) => s.openOnChart);
   const [sel, setSel] = useState<LabelOut | null>(null);
   const labels = useQuery({
     queryKey: ["labels", run.research_id, cell.variant, cell.experiment],
@@ -94,7 +94,7 @@ function Drill({ run, cell }: { run: ResearchOut; cell: Cell }) {
   const open = () => {
     if (!sel) return;
     const from = Math.floor(Date.parse(sel.signal_bar_start) / 1000) - 600;
-    set({ page: "chart", tf: "1m", focus: { from, to: Math.floor(Date.parse(sel.trade.exit_time) / 1000) + 600, nonce: Date.now(), tf: "1m", extra: labelOverlays(sel, near) } });
+    openOnChart({ tf: "1m", focus: { from, to: Math.floor(Date.parse(sel.trade.exit_time) / 1000) + 600, nonce: Date.now(), tf: "1m", extra: labelOverlays(sel, near) } });
   };
   return (
     <section data-testid="rs-drill">
@@ -167,7 +167,7 @@ function Detail({ id }: { id: string }) {
 }
 
 export default function Research() {
-  const { symbol } = useUi();
+  const symbol = useUi(indexSymbol);
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["research-runs"], queryFn: () => api<ResearchRow[]>("/research/runs") });
   const [sel, setSel] = useState<string | null>(null);
