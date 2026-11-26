@@ -5,7 +5,8 @@ import type { InstrumentOut } from "../api/schemas";
 import { ChartPane } from "../chart/ChartPane";
 import type { Tool } from "../chart/ChartView";
 import { TFS, TF_LABEL, type Tf } from "../chart/geometry";
-import { type ChartLayout, type PaneState, fromPrefs, toPrefs, updatePane } from "../chart/layout";
+import { type ChartLayout, type LayoutN, type PaneState, type Sizes, fromPrefs, setLayoutN, toPrefs, updatePane } from "../chart/layout";
+import { SplitLayout } from "../chart/SplitLayout";
 import { ReplayBar } from "../replay/ReplayBar";
 import { useReplay } from "../replay/store";
 import { activePane, useUi } from "../store";
@@ -53,6 +54,18 @@ export function Chart() {
     savePrefs(l);
   };
 
+  const setLayout = (n: LayoutN) => {
+    const l = setLayoutN(chart, n);
+    setChart(l);
+    savePrefs(l);
+  };
+  // read the latest layout from the store: drag events arrive faster than re-renders
+  const onSizes = (sizes: Sizes, done: boolean) => {
+    const l = { ...useUi.getState().chart, sizes };
+    setChart(l);
+    if (done) savePrefs(l);
+  };
+
   // when a trading symbol is ambiguous (csv and kite NIFTY 50) the options carry instrument ids
   const ambiguous = (instruments.data ?? []).filter((x) => x.tradingsymbol === symbol);
   const selectValue = ambiguous.length > 1 ? ambiguous[0]!.instrument_id : symbol;
@@ -61,6 +74,14 @@ export function Chart() {
     <div className="chart-page">
       <div className="toolbar" role="toolbar" aria-label="Chart controls">
         <ReplayBar times={times} tf={tf} />
+        <div className="seg" role="group" aria-label="Layout">
+          {([1, 2, 3] as const).map((n) => (
+            <button key={n} className={chart.layout === n ? "on" : ""} aria-pressed={chart.layout === n} data-testid={`layout-${n}`}
+              title={n === 1 ? "One chart" : n === 2 ? "Two charts side by side" : "Three charts: one large, two stacked"} onClick={() => setLayout(n)}>
+              {n === 1 ? "▣" : n === 2 ? "◫" : "⊞"} {n}
+            </button>
+          ))}
+        </div>
         <div className="seg" role="group" aria-label="Mode">
           <button className={!live ? "on" : ""} onClick={() => setLive(false)} data-testid="mode-history">History</button>
           <button className={live ? "on" : ""} onClick={() => { useReplay.getState().exit(); setLive(true); }} data-testid="mode-live">Live</button>
@@ -93,7 +114,9 @@ export function Chart() {
       </div>
       <div className="slot" ref={setBannerSlot} />
       <div className="chart-row">
-        {ready && chart.panes.map((pane, i) => (
+        {ready && (
+          <SplitLayout layout={chart.layout} sizes={chart.sizes} onSizes={onSizes}>
+            {chart.panes.map((pane, i) => (
           <ChartPane
             key={i}
             index={i}
@@ -108,7 +131,9 @@ export function Chart() {
             cardsSlot={cardsSlot}
             bannerSlot={bannerSlot}
           />
-        ))}
+            ))}
+          </SplitLayout>
+        )}
         <div className="slot" ref={setSidebarSlot} />
       </div>
       <div className="cards" ref={setCardsSlot} />
