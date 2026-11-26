@@ -7,6 +7,7 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   const problems: string[] = [];
   let loggedIn = false;
   page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+  page.on("response", (r) => { if (r.status() >= 500) problems.push(`http ${r.status()}: ${r.request().method()} ${r.url()}`); });
   page.on("console", (m) => {
     if (m.type() === "error" && !(!loggedIn && m.text().includes("401"))) problems.push(`console: ${m.text()}`);
   });
@@ -42,6 +43,31 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   await expect(panes.nth(2).getByTestId("chart")).toHaveAttribute("data-tf", "5m");
   await expect(panes.nth(0).getByTestId("chart")).toHaveAttribute("data-tf", "1m");
 
+  // option contract in pane C (active): an unrecorded one shows a note, a recorded one shows bars
+  // 1m first: the SYNTHETIC option bars are stamped at wall-clock time, off-session when this runs in the
+  // evening, and resampling off-session bars to 5m is an error (real recorded bars are always in session)
+  await page.locator('button[data-tf="1m"]').click();
+  const symbolSel = page.getByLabel("Symbol");
+  await symbolSel.selectOption("__option__");
+  await expect(page.getByTestId("option-picker")).toBeVisible();
+  const unrec = page.locator('[data-testid="pick-PE"][data-recorded="false"]').first();
+  if (await unrec.count()) {
+    await unrec.click();
+    await expect(panes.nth(2).getByTestId("pane-note")).toContainText("no recorded bars");
+    await symbolSel.selectOption("__option__");
+  }
+  // the SYNTHETIC fixture has 1m bars only for strikes 24950/25000/25050 of the nearest expiry
+  const rec = page.locator('.picker-row[data-strike="25000"] [data-testid="pick-CE"]');
+  const contract = (await rec.getAttribute("title"))!;
+  await rec.click();
+  await expect(page.getByTestId("option-picker")).toHaveCount(0);
+  const optChart = panes.nth(2).getByTestId("chart");
+  await expect(optChart).toHaveAttribute("data-symbol", contract);
+  await expect.poll(async () => Number(await optChart.getAttribute("data-bars"))).toBeGreaterThan(0);
+  await expect(panes.nth(2).getByTestId("pane-note")).toHaveCount(0);
+  await expect(panes.nth(2).getByTestId("legend")).toContainText(/ CE/);
+  await expect(panes.nth(0).getByTestId("chart")).toHaveAttribute("data-symbol", "NIFTY 50");
+
   // crosshair sync: hovering pane A puts pane B's crosshair (and legend) on the same 1m bar
   const legendTime = async (i: number) => ((await panes.nth(i).getByTestId("legend").innerText()).split(" O ")[0] ?? "").replace(/^.*· \w+\s*/, "");
   const pa = (await panes.nth(0).boundingBox())!;
@@ -73,7 +99,8 @@ test("layouts 1/2/3, resizable dividers, layout survives reload", async ({ page 
   await page.waitForTimeout(500); // prefs PUTs are fire-and-forget
   await page.reload();
   await expect(panes).toHaveCount(3);
-  await expect(panes.nth(2).getByTestId("chart")).toHaveAttribute("data-tf", "5m");
+  await expect(panes.nth(2).getByTestId("chart")).toHaveAttribute("data-tf", "1m");
+  await expect(panes.nth(2).getByTestId("chart")).toHaveAttribute("data-symbol", contract);
   await expect.poll(async () => Math.round((await panes.nth(0).boundingBox())!.width)).toBeCloseTo(Math.round(widened), -1);
 
   // double-click resets the column divider to equal widths

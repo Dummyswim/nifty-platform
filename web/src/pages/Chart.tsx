@@ -7,9 +7,12 @@ import type { Tool } from "../chart/ChartView";
 import { TFS, TF_LABEL, type Tf } from "../chart/geometry";
 import { type ChartLayout, type LayoutN, type PaneState, type Sizes, fromPrefs, setLayoutN, toPrefs, updatePane } from "../chart/layout";
 import { SplitLayout } from "../chart/SplitLayout";
+import { OptionPicker } from "../chart/OptionPicker";
 import { ReplayBar } from "../replay/ReplayBar";
 import { useReplay } from "../replay/store";
 import { activePane, useUi } from "../store";
+
+const OPTION = "__option__"; // symbol-select entry that opens the option picker
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "select", label: "Select" },
@@ -29,6 +32,8 @@ export function Chart() {
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const [times, setTimes] = useState<number[]>([]);
   const [tool, setTool] = useState<Tool>("select");
+  const [picking, setPicking] = useState(false);
+  const pane = activePane({ chart });
   // portal targets for the active pane's sidebar, engine cards and live banner
   const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null);
   const [cardsSlot, setCardsSlot] = useState<HTMLElement | null>(null);
@@ -86,7 +91,9 @@ export function Chart() {
           <button className={!live ? "on" : ""} onClick={() => setLive(false)} data-testid="mode-history">History</button>
           <button className={live ? "on" : ""} onClick={() => { useReplay.getState().exit(); setLive(true); }} data-testid="mode-live">Live</button>
         </div>
-        <select value={selectValue} onChange={(e) => pick({ symbol: e.target.value })} aria-label="Symbol">
+        <select value={pane.kind === "option" ? pane.symbol : selectValue} aria-label="Symbol"
+          onChange={(e) => (e.target.value === OPTION ? setPicking(true) : pick({ symbol: e.target.value }))}>
+          {pane.kind === "option" && <option value={pane.symbol}>{pane.label ?? pane.symbol}</option>}
           {(instruments.data ?? [{ tradingsymbol: symbol, instrument_id: symbol } as InstrumentOut]).map((i) => {
             const dup = (instruments.data ?? []).filter((x) => x.tradingsymbol === i.tradingsymbol).length > 1;
             return (
@@ -95,6 +102,7 @@ export function Chart() {
               </option>
             );
           })}
+          <option value={OPTION}>Option…</option>
         </select>
         <div className="seg" role="group" aria-label="Timeframe">
           {TFS.map((t) => (
@@ -137,6 +145,17 @@ export function Chart() {
         <div className="slot" ref={setSidebarSlot} />
       </div>
       <div className="cards" ref={setCardsSlot} />
+      {picking && (
+        <OptionPicker
+          onClose={() => setPicking(false)}
+          onPick={(id, label) => {
+            setPicking(false);
+            const l = updatePane(chart, chart.active, { symbol: id, kind: "option", label });
+            setChart(l);
+            savePrefs(l);
+          }}
+        />
+      )}
     </div>
   );
 }

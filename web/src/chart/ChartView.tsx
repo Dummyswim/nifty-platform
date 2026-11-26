@@ -56,6 +56,8 @@ export interface ChartViewProps {
   syncTime?: number | null | undefined;
   /** the user's crosshair time over this chart (null when the pointer leaves) */
   onCrosshairTime?: (t: number | null) => void;
+  /** legend name (e.g. an option's "NIFTY 29DEC 25800 CE"); default: symbol */
+  title?: string | undefined;
 }
 
 const PAGE = 5000;
@@ -73,7 +75,7 @@ const FUTURE_BARS = 30;
 export function ChartView({
   symbol, tf, tool, drawings, onCreate, onUpdate, onDelete, onToolDone,
   plots = [], overlays = [], overlayColors, cursor = null, focus = null, onTimes, liveBars = null,
-  syncTime, onCrosshairTime,
+  syncTime, onCrosshairTime, title,
 }: ChartViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -443,7 +445,7 @@ export function ChartView({
         onPointerUp={onUp}
       />
       <div className="legend" data-testid="legend">
-        <strong>{symbol}</strong> · {tf}
+        <strong>{title ?? symbol}</strong> · {tf}
         {shown && (
           <span>
             {" "}

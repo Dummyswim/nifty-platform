@@ -13,6 +13,7 @@ import { useReplay } from "../replay/store";
 import { useUi } from "../store";
 import { ChartView, type Tool } from "./ChartView";
 import type { PaneState } from "./layout";
+import { paneNote } from "./optionPane";
 
 export interface ChartPaneProps {
   index: number;
@@ -43,11 +44,21 @@ export function ChartPane(p: ChartPaneProps) {
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
   const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
-  const ind = useIndicators(symbol, tf, p.live && iid ? { source: `live:${iid}`, version: ver } : null);
+  // option contracts: the collector runs no engines for them, so Live re-runs the History path per finalized bar
+  const [finalized, setFinalized] = useState(0);
+  const isOption = p.pane.kind === "option";
+  const ind = useIndicators(symbol, tf, p.live && iid && !isOption ? { source: `live:${iid}`, version: ver } : null, isOption ? finalized : 0);
+  const [nBars, setNBars] = useState(-1);
   const myFocus = p.active ? focus : null;
   const overlays = useMemo(() => [...ind.overlays, ...(myFocus?.extra ?? [])], [ind.overlays, myFocus]);
   const sub = useLiveStream({ instrument: symbol, timeframe: tf, engines: ind.enabledIds, enabled: p.live });
   useEffect(() => setVer(sub.version), [sub.version]);
+  useEffect(() => {
+    if (isOption && sub.bars && !sub.bars.provisional) setFinalized((n) => n + 1);
+  }, [isOption, sub.bars]);
+  const onTimes = p.onTimes;
+  const reportTimes = (t: number[]) => { setNBars(t.length); onTimes?.(t); };
+  const note = nBars < 0 ? null : paneNote(p.pane.kind, nBars);
   const bn = banner(sub.state, sub.socket);
 
   const qc = useQueryClient();
@@ -82,11 +93,13 @@ export function ChartPane(p: ChartPaneProps) {
         overlayColors={ind.colors}
         cursor={cursor}
         focus={myFocus}
-        {...(p.onTimes ? { onTimes: p.onTimes } : {})}
+        onTimes={reportTimes}
+        title={p.pane.label}
         liveBars={p.live ? sub.bars : null}
         syncTime={syncTime}
         onCrosshairTime={(t) => useHover.setState((h) => (t === null && h.from !== p.index ? h : { t, from: p.index }))}
       />
+      {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
           {bn.text}

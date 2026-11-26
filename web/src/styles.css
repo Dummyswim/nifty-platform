@@ -82,3 +82,11 @@ table.chain { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8
 .pane-divider.col { cursor: col-resize; } .pane-divider.row { cursor: row-resize; }
 .pane-divider:hover, .pane-divider:active { background: var(--accent); }
 .pane-split.multi .pane.active { outline: 1px solid var(--accent); outline-offset: -1px; z-index: 1; }
+.pane-note { position: absolute; top: 34px; left: 12px; z-index: 3; color: var(--muted); font-size: 12px; pointer-events: none; }
+.picker-backdrop { position: fixed; inset: 0; z-index: 20; background: #0008; display: grid; place-items: center; }
+.picker { width: min(420px, 94vw); max-height: 80vh; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.picker header { display: flex; justify-content: space-between; align-items: center; }
+.picker-rows { overflow: auto; display: grid; gap: 2px; }
+.picker-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; padding: 2px 4px; border-radius: 6px; }
+.picker-row.atm { background: #1a2133; } .picker-row .strike { text-align: center; min-width: 90px; }
+.picker-row button { width: 100%; } .picker-row button.unrecorded { color: var(--muted); }

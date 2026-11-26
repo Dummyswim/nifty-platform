@@ -43,7 +43,8 @@ export function fieldsOf(engine: EngineOut): Field[] {
   return fieldsFromSchema(engine.params_schema as Schema);
 }
 
-export function useIndicators(symbol: string, chartTf: string, live: { source: string; version: number } | null = null) {
+/** `refresh`: bump to re-submit the History-path runs (an option pane in Live mode, on each finalized bar). */
+export function useIndicators(symbol: string, chartTf: string, live: { source: string; version: number } | null = null, refresh = 0) {
   const qc = useQueryClient();
   const engines = useQuery({ queryKey: ["engines"], queryFn: () => api<EngineOut[]>("/engines") });
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
@@ -73,7 +74,7 @@ export function useIndicators(symbol: string, chartTf: string, live: { source: s
   const runKey = (e: EngineOut) => paramsForRun(fieldsOf(e), state[e.id]!.params);
   const runs = useQueries({
     queries: active.map((e) => ({
-      queryKey: ["run", e.id, symbol, engineTf(e, chartTf), JSON.stringify(runKey(e)), live?.source ?? "", live?.version ?? 0],
+      queryKey: ["run", e.id, symbol, engineTf(e, chartTf), JSON.stringify(runKey(e)), live?.source ?? "", live?.version ?? 0, refresh],
       // live: the collector's own run (source live:<instrument>), refetched when the server says outputs changed
       queryFn: live
         ? () => api<PlotsOut>(`/plots?engine_id=${e.id}&snapshot_id=${encodeURIComponent(live.source)}&timeframe=${engineTf(e, chartTf)}`).then((p) => p.run_id)
