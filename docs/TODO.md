@@ -14,6 +14,10 @@ Options carry data the NIFTY index does not. Each item needs its own design befo
 - **Put/call relationships:** CE vs PE premium divergence at the same strike as a confirmation of index
   direction.
 
+- **Market context panel follow-ups** (spec 2026-11-27): score the bias with the research engine once
+  enough sessions are recorded; SENSEX via the underlyings registry (India VIX labelled `proxy`); a params
+  UI for prefs key `context` (thresholds are editable only via the pref today).
+
 ## Known limitations
 - Collector provisional-bar throttle (250 ms) is shared by all instruments, so option forming candles may
   refresh less smoothly than the index (`collector/service.py:166`).
