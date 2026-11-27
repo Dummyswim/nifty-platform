@@ -30,6 +30,21 @@ from nifty.timeutil import IST, Calendar, utcnow
 
 log = logging.getLogger("nifty.collector")
 RECONCILE_AFTER = (15, 35)  # IST
+VIX_SYMBOL = "INDIA VIX"
+
+
+def vix_index(ins: list[Instrument]) -> Instrument | None:
+    return next(
+        (
+            i
+            for i in ins
+            if i.instrument_type == "INDEX"
+            and i.exchange == "NSE"
+            and i.tradingsymbol == VIX_SYMBOL
+            and i.provider_token is not None
+        ),
+        None,
+    )
 
 
 def enabled_engines(prefs: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -105,6 +120,9 @@ async def run(settings: Settings | None = None) -> int:
         print("Kite is not connected: Settings -> Connect Kite, then start the collector again.")
         return 2
     idx, fut = nifty_index(ins), front_month_future(ins, utcnow().date())
+    vix = vix_index(ins)
+    if vix is None:
+        log.warning("INDIA VIX not in master; recording without it")
     if idx is None or idx.provider_token is None:
         print("instrument master missing NIFTY 50: Settings -> Refresh instruments.")
         return 2
@@ -115,6 +133,9 @@ async def run(settings: Settings | None = None) -> int:
     if fut is not None and fut.provider_token is not None:
         pipe.add_feed(fut)  # front-month future: proxy volume for the index (D10/D20)
         tokens[fut.provider_token] = fut.instrument_id
+    if vix is not None and vix.provider_token is not None:
+        pipe.add_feed(vix)  # India VIX: 1m bars only, no engines
+        tokens[vix.provider_token] = vix.instrument_id
     client = KiteClient(s.kite_api_key, s.kite_api_secret, token)
     planner = make_planner(prefs, option_list, utcnow())
     stop = asyncio.Event()
@@ -157,7 +178,8 @@ async def run(settings: Settings | None = None) -> int:
             pipe.state["auth_expired"] = True
             stop.set()
         if state == "connected":
-            for i in (idx, fut):  # (re)connect: fill the gap from historical 1m, rebuild engines
+            # (re)connect: fill the gap from historical 1m, rebuild engines
+            for i in (idx, fut, vix):
                 if i is not None:
                     try:
                         n = await asyncio.to_thread(backfill_gap, pipe, client, i, cal)
@@ -177,7 +199,7 @@ async def run(settings: Settings | None = None) -> int:
             local: datetime = utcnow().astimezone(IST)
             if (local.hour, local.minute) >= RECONCILE_AFTER and reconciled_day != local.date():
                 reconciled_day = local.date()
-                for i in (idx, fut):
+                for i in (idx, fut, vix):
                     if i is not None:
                         try:
                             n = await asyncio.to_thread(reconcile_day, pipe, client, i, cal)
