@@ -28,12 +28,15 @@ def band(vix: float, pct: float, floor: float) -> float:
 
 
 def verdict(iv: float, vix: float, prev: Verdict | None, p: ContextParams) -> Verdict:
-    """Classify IV against VIX. FAIR is sticky: it only ends outside the wider exit band."""
-    if prev == "FAIR":
-        exit_band = band(vix, p.exit_pct, p.band_floor * p.exit_pct / p.band_pct)
-        if abs(iv - vix) <= exit_band:
-            return "FAIR"
+    """Classify IV against VIX with hysteresis: a state is left only outside its exit band."""
     entry = band(vix, p.band_pct, p.band_floor)
+    gap = band(vix, p.exit_pct, p.band_floor * p.exit_pct / p.band_pct) - entry
+    if prev == "FAIR" and abs(iv - vix) <= entry + gap:
+        return "FAIR"
+    if prev == "RICH" and iv - vix > entry - gap:
+        return "RICH"
+    if prev == "CHEAP" and vix - iv > entry - gap:
+        return "CHEAP"
     if iv - vix > entry:
         return "RICH"
     if vix - iv > entry:

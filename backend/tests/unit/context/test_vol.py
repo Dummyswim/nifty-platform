@@ -45,6 +45,13 @@ def test_verdict_hysteresis() -> None:
     assert verdict(12.1, 14, "FAIR", P) == "CHEAP"
 
 
+def test_verdict_hysteresis_rich_cheap() -> None:
+    assert verdict(15.1, 14, "RICH", P) == "RICH"
+    assert verdict(14.9, 14, "RICH", P) == "FAIR"
+    assert verdict(12.9, 14, "CHEAP", P) == "CHEAP"
+    assert verdict(13.1, 14, "CHEAP", P) == "FAIR"
+
+
 def test_verdict_exit_floor_scales() -> None:
     # low VIX: exit floor 1.3 -> FAIR holds at +1.25, entry would say RICH
     assert verdict(9.25, 8, "FAIR", P) == "FAIR"
