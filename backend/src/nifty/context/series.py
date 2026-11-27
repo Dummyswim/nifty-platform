@@ -150,9 +150,11 @@ def _legs(
     r_at = m - timedelta(minutes=roll_min)
     for o, c_tr, oi_tr in opts:
         c, oi = c_tr.at(m, inp.max_stale_s), oi_tr.at(m, inp.max_stale_s)
-        if c is None or oi is None:
+        if c is None:
             continue
-        closes[(o.strike, o.is_call)] = c
+        closes[(o.strike, o.is_call)] = c  # IV/straddle need only a fresh close
+        if oi is None:
+            continue
         prem_base = o.prev_close if o.prev_close is not None else c_tr.first(m)
         oi_base = o.prev_oi if o.prev_oi is not None else oi_tr.first(m)
         first_tick |= o.prev_close is None or o.prev_oi is None
@@ -291,12 +293,15 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
             fair = vol.fair_straddle_prem(spot_m, vix_m, years_to_expiry(expiry, m + _BAR))
         vix_open = vix_tr.first(m)
         prev = inp.prev_spot_close
+        exp_move = None
+        if prev is not None and vix_open is not None:
+            exp_move = vol.expected_move_pts(prev, vix_open)
         out.append(State(
             t=t, vix=vix_m, vix_rank=rank, vix_high=vix_high, ce=sides[True], pe=sides[False],
             rv=inp.rv, straddle_prem=straddle, fair_straddle_prem=fair, w_day=w_day, w_roll=w_roll,
             oi_ce=oi_ce, oi_pe=oi_pe, one_sided=os_, candidate=cand, bias=carry.bias,
             bias_since=carry.since,
-            exp_move_pts=vol.expected_move_pts(prev, vix_open) if prev and vix_open else None,
+            exp_move_pts=exp_move,
             day_move_pts=spot_m - prev if prev is not None and spot_m is not None else None,
             na_reason=na,
         ))  # fmt: skip

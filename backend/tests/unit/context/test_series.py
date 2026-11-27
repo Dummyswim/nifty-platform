@@ -32,6 +32,8 @@ def make_day(
     ce_oi: Callable[[int, float], float] = call_writing,
     pe_oi: Callable[[int, float], float] = flat,
     alive: Callable[[int, float, bool], bool] = lambda i, k, c: True,
+    oi_alive: Callable[[int, float, bool], bool] = lambda i, k, c: True,
+    vix: Callable[[int], float] = lambda i: 18.0,
     prev_oi: float | None = 1000.0,
     r: float | None = 0.065,
     n_prior: int = 252,
@@ -52,14 +54,16 @@ def make_day(
                 if i == 0:
                     prev_close = 1.5 * g.price
                 if alive(i, k, is_call):
-                    close[m], oi[m] = g.price, oi_fn(i, k)
+                    close[m] = g.price
+                    if oi_alive(i, k, is_call):
+                        oi[m] = oi_fn(i, k)
             options.append(OptSeries(k, is_call, expiry, close, oi, prev_close, prev_oi))
     return DayInputs(
         day=day,
         minutes=list(MINUTES),
         spot={m: spot(i) for i, m in enumerate(MINUTES)},
         prev_spot_close=25950.0,
-        vix={m: 18.0 for m in MINUTES},
+        vix={m: vix(i) for i, m in enumerate(MINUTES)},
         vix_prior_closes=[10 + 10 * j / (n_prior - 1) for j in range(n_prior)],
         own_iv={("weekly", True): 17.5},
         rv=12.0,
@@ -130,10 +134,29 @@ def test_release_after_two() -> None:
 
 def test_series_atm_switch_no_bias_flip() -> None:
     k = idx(9, 40)
-    _, s, _ = build_series(make_day(spot=lambda i: 26000.0 if i < k else 26030.0), P)
+
+    def ce(i: int, strike: float) -> float:  # 26200 enters play at k unwinding, not writing
+        return 1000.0 - 10 * i if strike == 26200 else call_writing(i, strike)
+
+    def spot(i: int) -> float:
+        return 26000.0 if i < k else 26030.0
+
+    _, s, _ = build_series(make_day(spot=spot, ce_oi=ce), P)
     since = s[idx(9, 32)]["bias_since"]
     assert all(x["bias"] == "BEARISH" and x["bias_since"] == since for x in s[idx(9, 32) :])
     assert s[k]["pe"]["iv"] == pytest.approx(18.0, abs=0.05)
+    assert s[k - 1]["oi_ce"] == 7 * 2400  # 25850..26150
+    assert s[k]["oi_ce"] == 6 * 2500 - 250  # 25900..26200: 25850 left, 26200 entered
+    t = years_to_expiry(EXP, MINUTES[k] + timedelta(seconds=60))
+    legs = [bs(26030.0, 26050.0, t, 0.065, 0.18, c) for c in (True, False)]
+    assert s[k]["straddle_prem"] == pytest.approx(sum(g.price for g in legs if g))  # ATM 26050
+
+
+def test_stale_oi_keeps_iv_and_straddle() -> None:
+    _, s, _ = build_series(make_day(oi_alive=lambda i, k, c: i < 20), P)
+    x = s[25]
+    assert x["w_day"] is None and x["na_reason"] == "no option data"
+    assert x["pe"]["iv"] == pytest.approx(18.0, abs=0.05) and x["straddle_prem"] is not None
 
 
 def test_stale_strike_dropped() -> None:
@@ -186,7 +209,8 @@ def test_short_vix_history() -> None:
 
 
 def test_no_lookahead() -> None:
-    full = make_day()
+    # spot drifts 25990 -> 26038 by the cut (ATM 26000 -> 26050 at i=18); VIX rises 17 -> 18.2
+    full = make_day(spot=lambda i: 25990.0 + 2 * i, vix=lambda i: 17.0 + 0.05 * i)
     cut = MINUTES[24]
 
     def trim(d: dict[datetime, float]) -> dict[datetime, float]:
