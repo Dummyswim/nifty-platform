@@ -74,6 +74,8 @@ class Feed:
     run_ids: dict[str, str] = field(default_factory=dict)
     # run label (engine@tf) -> True for the default timeframe (the only run doing early alerts)
     default_tf: dict[str, bool] = field(default_factory=dict)
+    # per feed: a shared throttle let the index starve option feeds of forming-bar updates
+    throttle: Throttle = field(default_factory=lambda: Throttle(0.25))
 
 
 class Pipeline:
@@ -89,7 +91,7 @@ class Pipeline:
         self.cal = calendar or Calendar.load()
         self.clock, self.provider = clock, provider
         self.feeds: dict[str, Feed] = {}
-        self.watchdog, self.throttle = Watchdog(STALE_AFTER_S), Throttle(0.25)
+        self.watchdog = Watchdog(STALE_AFTER_S)
         self._ticks: list[tuple[str, PacketTick, datetime]] = []
         self._last_flush = clock()
         self.state: dict[str, Any] = {"connected": False, "auth_expired": False, "reconnects": 0,
@@ -163,7 +165,7 @@ class Pipeline:
         self._ticks.append((instrument_id, tick, recv))
         for bar in feed.builder.on_tick(tick, recv):
             self.process_bar(feed, bar)
-        if self.throttle.ok(now):
+        if feed.throttle.ok(now):
             prov = feed.builder.provisional()
             if prov is not None:
                 msg: dict[str, Any] = {"type": "provisional", "bar": bar_json(prov)}

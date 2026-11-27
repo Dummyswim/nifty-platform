@@ -14,7 +14,7 @@ import nifty.engines.nvs  # noqa: F401
 from nifty.api.stream import Outbox
 from nifty.collector.demo import DEMO_ID, ORACLE, ticks_of
 from nifty.collector.reconcile import plan_reconcile
-from nifty.collector.service import Pipeline
+from nifty.collector.service import Pipeline, Publisher
 from nifty.contracts import Bar, Instrument
 from nifty.db.bars import read_bars
 from nifty.db.instruments import upsert_instrument
@@ -325,3 +325,26 @@ def test_restart_with_a_sliding_warmup_window_rewrites_overlays(
     want = [(o.id, o.ver, o.deleted, None if o.p0 is None else str(o.p0)) for o in batch.overlays]
     assert len(want) > 0
     assert [tuple(r) for r in got] == want
+
+
+def test_provisional_bars_are_throttled_per_instrument_not_globally(
+    db: Engine, src: list[Bar]
+) -> None:
+    """An option ticking right after the index must still get its forming bar published."""
+    other = INS.model_copy(update={"instrument_id": "DEMO:OPT", "tradingsymbol": "DEMO:OPT"})
+    with db.begin() as c:
+        upsert_instrument(c, other)
+    sent: list[tuple[str, str]] = []
+
+    class Rec(Publisher):
+        def publish(self, channel: str, msg: dict[str, object]) -> None:
+            sent.append((channel, str(msg["type"])))
+
+    p = Pipeline(db, Rec(None), CAL, Clock(), provider="csv")
+    p.add_feed(INS)
+    p.add_feed(other)
+    t = next(ticks_of(src[0]))
+    p.handle_tick(DEMO_ID, t)
+    p.handle_tick("DEMO:OPT", t)
+    assert (f"live:{DEMO_ID}", "provisional") in sent
+    assert ("live:DEMO:OPT", "provisional") in sent
