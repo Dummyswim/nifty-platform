@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
+import { ContextBox, ContextToggle } from "../context/ContextBox";
+import { useMarketContext } from "../context/useMarketContext";
 import { EnginePanel } from "../indicators/EnginePanel";
 import { IndicatorPanel } from "../indicators/IndicatorPanel";
 import { useIndicators } from "../indicators/useIndicators";
@@ -37,7 +39,12 @@ export function ChartPane(p: ChartPaneProps) {
   const focus = useUi((s) => s.focus);
   const cursor = useReplay((r) => r.cursor);
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
-  const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
+  const inst = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol);
+  const iid = inst?.instrument_id;
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
+  const showContext = p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50" && prefs.data?.["context.show"] !== false;
+  const istDate = cursor === null ? undefined : new Date((cursor + 19800) * 1000).toISOString().slice(0, 10);
+  const mctx = useMarketContext("NIFTY", p.live, istDate);
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
   // option contracts: the collector runs no engines for them, so Live re-runs the History path per finalized bar
   const [finalized, setFinalized] = useState(0);
@@ -97,6 +104,7 @@ export function ChartPane(p: ChartPaneProps) {
         syncIndex={p.index}
         keysEnabled={p.active}
       />
+      {showContext && <ContextBox data={mctx.data} cursor={cursor} />}
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
@@ -106,7 +114,10 @@ export function ChartPane(p: ChartPaneProps) {
         p.bannerSlot,
       )}
       {p.active && p.sidebarSlot && createPortal(
-        <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />,
+        <div className="side">
+          {p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50" && <ContextToggle />}
+          <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
+        </div>,
         p.sidebarSlot,
       )}
       {p.active && p.cardsSlot && createPortal(

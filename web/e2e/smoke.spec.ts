@@ -142,6 +142,17 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByTestId("rs-open-chart").click();
   await expect(chart).toBeVisible();
 
+  // market context box: the oracle has no option data, so it shows an n/a line; the sidebar switch hides it
+  const ctx = page.getByTestId("context-box");
+  await expect(ctx).toBeVisible();
+  await expect(ctx).toHaveAttribute("data-na", "1");
+  await expect(ctx).toContainText(/n\/a|no /);
+  const ctxToggle = page.getByLabel("Toggle market context");
+  await ctxToggle.click();
+  await expect(ctx).toHaveCount(0);
+  await ctxToggle.click();
+  await expect(ctx).toBeVisible();
+
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();
   await expect(page.getByTestId("equity")).toBeVisible();
