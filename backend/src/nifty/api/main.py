@@ -8,6 +8,7 @@ from sqlalchemy import text
 from nifty.api import (
     auth,
     chart_routes,
+    context_routes,
     kite_routes,
     options_routes,
     research_routes,
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(chart_routes.router, prefix="/api/v1")
     app.include_router(kite_routes.router, prefix="/api/v1")
     app.include_router(options_routes.router, prefix="/api/v1")
+    app.include_router(context_routes.router, prefix="/api/v1")
     app.include_router(research_routes.router, prefix="/api/v1")
     app.include_router(stream.router)
     return app

@@ -27,3 +27,6 @@ export type ResearchIn = components["schemas"]["ResearchIn"];
 export type ResearchRow = components["schemas"]["ResearchRow"];
 export type ResearchOut = components["schemas"]["ResearchOut"];
 export type LabelOut = components["schemas"]["LabelOut"];
+export type ContextOut = components["schemas"]["ContextOut"];
+export type ContextState = components["schemas"]["StateOut"];
+export type ContextSide = components["schemas"]["SideOut"];

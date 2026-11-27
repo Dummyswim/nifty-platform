@@ -575,6 +575,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Context */
+        get: operations["context_api_v1_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/runs": {
         parameters: {
             query?: never;
@@ -869,6 +886,23 @@ export interface components {
             last_tick_age_s?: number | null;
             /** Updated Age S */
             updated_age_s?: number | null;
+        };
+        /** ContextOut */
+        ContextOut: {
+            /** Underlying */
+            underlying: string;
+            /** Date */
+            date?: string | null;
+            /** Expiry */
+            expiry?: string | null;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Series */
+            series: components["schemas"]["StateOut"][];
+            /** Notes */
+            notes: string[];
         };
         /** ContractBarsOut */
         ContractBarsOut: {
@@ -1472,6 +1506,58 @@ export interface components {
             greeks: string;
             /** Greeks Note */
             greeks_note?: string | null;
+        };
+        /** SideOut */
+        SideOut: {
+            /** Iv */
+            iv?: number | null;
+            /** Verdict */
+            verdict?: string | null;
+            /** Own Iv */
+            own_iv?: number | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** StateOut */
+        StateOut: {
+            /** T */
+            t: number;
+            /** Vix */
+            vix?: number | null;
+            /** Vix Rank */
+            vix_rank?: number | null;
+            /** Vix High */
+            vix_high?: boolean | null;
+            ce: components["schemas"]["SideOut"];
+            pe: components["schemas"]["SideOut"];
+            /** Rv */
+            rv?: number | null;
+            /** Straddle Prem */
+            straddle_prem?: number | null;
+            /** Fair Straddle Prem */
+            fair_straddle_prem?: number | null;
+            /** W Day */
+            w_day?: number | null;
+            /** W Roll */
+            w_roll?: number | null;
+            /** Oi Ce */
+            oi_ce?: number | null;
+            /** Oi Pe */
+            oi_pe?: number | null;
+            /** One Sided */
+            one_sided?: number | null;
+            /** Candidate */
+            candidate: string;
+            /** Bias */
+            bias: string;
+            /** Bias Since */
+            bias_since?: number | null;
+            /** Exp Move Pts */
+            exp_move_pts?: number | null;
+            /** Day Move Pts */
+            day_move_pts?: number | null;
+            /** Na Reason */
+            na_reason?: string | null;
         };
         /** SubmitOut */
         SubmitOut: {
@@ -2663,6 +2749,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContractBarsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    context_api_v1_context_get: {
+        parameters: {
+            query?: {
+                underlying?: string;
+                date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextOut"];
                 };
             };
             /** @description Validation Error */
