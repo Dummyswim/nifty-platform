@@ -131,6 +131,7 @@ def test_context_bias_on_seeded_day(seeded: Any) -> None:
     assert last["w_day"] == -1.0 and last["bias"] == "BEARISH"
     assert last["ce"]["own_iv"] == pytest.approx(15.0, abs=0.1)  # 3 prior sessions with bars
     assert last["rv"] is not None and body["params"]["band_pct"] == 10
+    assert all(x["flags"] == [] for x in s) and body["notes"] == []
     assert _get(c) == body  # served again (cached) unchanged
 
 
@@ -141,6 +142,14 @@ def test_context_without_rate(seeded: Any) -> None:
     s = _get(c)["series"]
     assert s and all(x["ce"]["iv"] is None for x in s)
     assert all(x["na_reason"] == "IV n/a: set rate in Settings" for x in s)
+
+
+def test_context_bad_params_422(seeded: Any) -> None:
+    c, eng = seeded
+    with eng.begin() as conn:
+        set_pref(conn, "context", {"band_pct": 10, "exit_pct": 5})
+    r = c.get("/api/v1/context", params={"date": DAY.isoformat()})
+    assert r.status_code == 422 and "invalid context prefs" in r.text
 
 
 def test_context_no_session(seeded: Any) -> None:

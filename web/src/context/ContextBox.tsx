@@ -1,22 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ContextOut, ContextSide } from "../api/schemas";
-import { pickState } from "./pick";
+import { boxView } from "./pick";
 
 const hhmm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16); // IST
 const signed = (v: number, d: number) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
 const side = (name: string, s: ContextSide) => `${name} IV ${s.iv!.toFixed(1)}${s.verdict ? ` ${s.verdict}` : ""}`;
 
-export function ContextBox({ data, cursor }: { data?: ContextOut; cursor: number | null }) {
-  const s = data ? pickState(data.series, cursor) : null;
+export function ContextBox({ data, error, cursor }: { data?: ContextOut; error?: unknown; cursor: number | null }) {
+  const { state: s, note, flags } = boxView(data, cursor, error);
   const na = !s || !!s.na_reason;
   const rows: string[] = [];
-  let note: string | null = null;
-  if (!s) {
-    note = data?.notes[0] ?? "no data";
-  } else if (s.na_reason) {
-    note = s.na_reason.includes("n/a") ? s.na_reason : `n/a: ${s.na_reason}`;
-  } else {
+  if (s && !note) {
     if (s.vix != null) rows.push(`VIX ${s.vix.toFixed(1)}${s.vix_rank != null ? `  P${Math.round(s.vix_rank)}` : ""}${s.vix_high ? "  HIGH" : ""}`);
     const iv = [s.ce.iv != null && side("CE", s.ce), s.pe.iv != null && side("PE", s.pe)].filter(Boolean);
     if (iv.length) rows.push(iv.join(" · "));
@@ -36,6 +31,7 @@ export function ContextBox({ data, cursor }: { data?: ContextOut; cursor: number
     <div className="context-box" data-testid="context-box" data-bias={s?.bias ?? "NONE"} data-na={na ? "1" : undefined}>
       <div className="ctx-head">Market context{s && ` ${hhmm(s.t)}`}</div>
       {note ? <div className="ctx-na">{note}</div> : rows.map((r) => <div key={r}>{r}</div>)}
+      {flags.length > 0 && <div className="ctx-flags">{flags.join(" · ")}</div>}
     </div>
   );
 }
@@ -49,8 +45,12 @@ export function ContextToggle() {
     // cancel an in-flight prefs refetch so it cannot overwrite the optimistic value
     onMutate: async (value) => {
       await qc.cancelQueries({ queryKey: ["prefs"] });
+      const prev = qc.getQueryData<Record<string, unknown>>(["prefs"]);
       qc.setQueryData(["prefs"], (old: Record<string, unknown> | undefined) => ({ ...(old ?? {}), "context.show": value }));
+      return { prev };
     },
+    onError: (_e, _v, ctx) => qc.setQueryData(["prefs"], ctx?.prev),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["prefs"] }),
   });
   return (
     <label className="ctx-toggle">

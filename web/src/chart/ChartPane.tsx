@@ -104,7 +104,7 @@ export function ChartPane(p: ChartPaneProps) {
         syncIndex={p.index}
         keysEnabled={p.active}
       />
-      {showContext && <ContextBox data={mctx.data} cursor={cursor} />}
+      {showContext && <ContextBox data={mctx.data} error={mctx.error} cursor={cursor} />}
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>

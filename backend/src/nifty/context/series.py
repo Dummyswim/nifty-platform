@@ -15,8 +15,8 @@ from nifty.options.chain import atm, strike_step
 from nifty.timeutil import to_ist
 
 NA_RATE = "IV n/a: set rate in Settings"
-NOTE_FIRST_TICK = "writing since first tick"
-NOTE_EXPIRY_DAY = "expiry day: next weekly"
+FLAG_FIRST_TICK = "writing since first tick"
+FLAG_EXPIRY_DAY = "expiry day: next weekly"
 _BAR = timedelta(seconds=60)
 _VIX_MIN = 200  # same minimum as vol.vix_rank
 
@@ -77,6 +77,7 @@ class State(TypedDict):
     exp_move_pts: float | None
     day_move_pts: float | None
     na_reason: str | None
+    flags: list[str]  # facts about this minute only (FLAG_*)
 
 
 def choose_expiry(day: date, expiries: Sequence[date]) -> date | None:
@@ -183,11 +184,15 @@ def _side_note(iv: float | None, own: float | None, vix_m: float | None, rv: flo
     return "; ".join(notes) or None
 
 
+def _drop_bias(c: _Carry) -> None:
+    c.bias, c.since, c.miss, c.run, c.run_cand = "NONE", None, 0, 0, "NONE"
+
+
 def _advance_bias(c: _Carry, cand: str, gated: bool, t: int, p: ContextParams) -> None:
     if c.bias != "NONE":
         c.miss = 0 if cand == c.bias else c.miss + 1
         if c.miss >= p.release:
-            c.bias, c.since, c.miss, c.run, c.run_cand = "NONE", None, 0, 0, "NONE"
+            _drop_bias(c)
         return
     if gated or cand == "NONE":
         c.run, c.run_cand = 0, "NONE"
@@ -199,9 +204,10 @@ def _advance_bias(c: _Carry, cand: str, gated: bool, t: int, p: ContextParams) -
 
 
 def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[State], list[str]]:
-    """(expiry used, one State per minute, notes)."""
+    """(expiry used, one State per minute, day-level notes)."""
     expiry = choose_expiry(inp.day, inp.expiries)
-    notes: list[str] = [NOTE_EXPIRY_DAY] if expiry is not None and inp.day in inp.expiries else []
+    notes: list[str] = []
+    expiry_day = expiry is not None and inp.day in inp.expiries
     opts = [(o, _Track(o.close), _Track(o.oi)) for o in inp.options if o.expiry == expiry]
     strikes = sorted({o.strike for o in inp.options if o.expiry == expiry})
     step = strike_step(strikes)
@@ -225,13 +231,12 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
         day_legs: list[Leg] = []
         roll_legs: list[Leg] = []
         closes: dict[tuple[float, bool], float] = {}
+        first_tick = False
         atm_k = atm(spot_m, strikes) if spot_m is not None else None
         if expiry is not None and atm_k is not None and step is not None:
             span = n_steps * step + 1e-6
             in_play = [x for x in opts if abs(x[0].strike - atm_k) <= span]
             day_legs, roll_legs, closes, first_tick = _legs(in_play, m, inp, p.roll_min)
-            if first_tick and NOTE_FIRST_TICK not in notes:
-                notes.append(NOTE_FIRST_TICK)
 
         ivs: dict[bool, float | None] = {True: None, False: None}
         if expiry is not None and spot_m is not None and inp.r is not None:
@@ -283,7 +288,10 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
                     cand = "BEARISH"
                 elif direction == 1 and sides[True]["verdict"] in ("FAIR", "CHEAP"):
                     cand = "BULLISH"
-        _advance_bias(carry, cand, to_ist(m).time() < not_before, t, p)
+        if na is None:
+            _advance_bias(carry, cand, to_ist(m).time() < not_before, t, p)
+        else:  # an n/a minute never shows a bias; a new one needs `confirm` fresh minutes
+            _drop_bias(carry)
 
         straddle = None
         if atm_k is not None and (atm_k, True) in closes and (atm_k, False) in closes:
@@ -304,5 +312,7 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
             exp_move_pts=exp_move,
             day_move_pts=spot_m - prev if prev is not None and spot_m is not None else None,
             na_reason=na,
+            flags=[f for f, on in ((FLAG_EXPIRY_DAY, expiry_day), (FLAG_FIRST_TICK, first_tick))
+                   if on],
         ))  # fmt: skip
     return expiry, out, notes

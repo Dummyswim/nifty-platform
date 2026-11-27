@@ -1558,6 +1558,8 @@ export interface components {
             day_move_pts?: number | null;
             /** Na Reason */
             na_reason?: string | null;
+            /** Flags */
+            flags: string[];
         };
         /** SubmitOut */
         SubmitOut: {

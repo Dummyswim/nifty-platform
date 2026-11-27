@@ -90,3 +90,30 @@ def test_realised_vol_needs_two_sessions() -> None:
 def test_params_forbid_extra() -> None:
     with pytest.raises(ValidationError):
         ContextParams.model_validate({"foo": 1})
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"band_pct": 0},
+        {"band_pct": -1},
+        {"exit_pct": 9},  # below band_pct 10
+        {"vix_exit_pct": 71},  # above vix_pct 70
+        {"w_exit": 0.31},  # above w_min 0.3
+        {"confirm": 0},
+        {"release": 0},
+        {"roll_min": 0},
+        {"strikes": 0},
+        {"not_before": "9.30"},
+        {"not_before": "25:00"},
+        {"not_before": "09:30:00"},
+    ],
+)
+def test_params_reject_inconsistent(bad: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        ContextParams.model_validate(bad)
+
+
+def test_params_accept_boundaries() -> None:
+    ContextParams.model_validate({"exit_pct": 10, "vix_exit_pct": 70, "w_exit": 0.3,
+                                  "confirm": 1, "release": 1, "roll_min": 1, "strikes": 1})  # fmt: skip

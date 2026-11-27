@@ -88,7 +88,7 @@ def test_choose_expiry() -> None:
 
 def test_bearish_after_confirm() -> None:
     expiry, s, notes = build_series(make_day(), P)
-    assert expiry == EXP and notes == []
+    assert expiry == EXP and notes == [] and all(x["flags"] == [] for x in s)
     assert s[idx(9, 16)]["candidate"] == "BEARISH"
     assert s[idx(9, 31)]["bias"] == "NONE"
     first = idx(9, 32)
@@ -173,19 +173,49 @@ def test_stale_strike_dropped() -> None:
     assert s[22]["w_day"] == -1.0  # PE 25900 dropped
     assert s[31]["na_reason"] is None and s[31]["bias"] == "BEARISH"
     assert s[32]["na_reason"] == "no option data" and s[32]["w_day"] is None
-    assert s[32]["bias"] == "BEARISH" and s[33]["bias"] == "NONE"
+    # an n/a minute never carries a bias: released at once
+    assert all(x["bias"] == "NONE" and x["bias_since"] is None for x in s[32:])
     assert all(x["candidate"] == "NONE" for x in s[32:])
+
+
+def test_na_minute_releases_bias_and_needs_fresh_confirm() -> None:
+    k = idx(9, 36)  # one minute with no VIX while BEARISH is shown
+    inp = make_day()
+    gone = inp.minutes[k]
+    inp.vix.pop(gone)
+    inp = DayInputs(**{**inp.__dict__, "max_stale_s": 30})  # the gap is not carried
+    _, s, _ = build_series(inp, P)
+    assert s[k - 1]["bias"] == "BEARISH" and s[k]["na_reason"] == "no VIX data"
+    assert s[k]["bias"] == "NONE" and s[k]["bias_since"] is None
+    # a new bias needs `confirm` fresh minutes after the gap
+    assert [x["bias"] for x in s[k + 1 : k + 4]] == ["NONE", "NONE", "BEARISH"]
+    assert s[k + 3]["bias_since"] == s[k + 3]["t"]
 
 
 def test_baseline_fallback_first_tick() -> None:
     _, s, notes = build_series(make_day(prev_oi=None), P)
-    assert "writing since first tick" in notes
+    assert notes == []
+    assert all(x["flags"] == ["writing since first tick"] for x in s)
     assert s[idx(9, 32)]["bias"] == "BEARISH"
+
+
+def test_first_tick_flag_only_on_minutes_using_it() -> None:
+    # the only first-tick legs (no prior OI) are strikes far from ATM that enter play at k
+    k = idx(9, 40)
+    inp = make_day(spot=lambda i: 26000.0 if i < k else 26300.0)
+    far = {o.strike for o in inp.options if o.strike > 26150}
+    opts = [OptSeries(o.strike, o.is_call, o.expiry, o.close, o.oi, o.prev_close,
+                      None if o.strike in far else o.prev_oi) for o in inp.options]  # fmt: skip
+    _, s, notes = build_series(DayInputs(**{**inp.__dict__, "options": opts}), P)
+    assert notes == []
+    assert all(x["flags"] == [] for x in s[:k])
+    assert all(x["flags"] == ["writing since first tick"] for x in s[k:])
 
 
 def test_expiry_day_uses_next_weekly() -> None:
     expiry, s, notes = build_series(make_day(day=DAY, expiries=(DAY, EXP)), P)
-    assert expiry == EXP and "expiry day: next weekly" in notes
+    assert expiry == EXP and notes == []
+    assert all(x["flags"] == ["expiry day: next weekly"] for x in s)
     assert s[idx(9, 32)]["bias"] == "BEARISH"
 
 

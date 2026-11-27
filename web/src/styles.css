@@ -96,3 +96,4 @@ table.chain { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8
 .context-box { position: absolute; top: 34px; right: 64px; z-index: 4; pointer-events: auto; padding: 6px 10px; font-size: 11px; line-height: 1.45; white-space: pre; font-variant-numeric: tabular-nums; background: #121724cc; border: 1px solid var(--line); border-radius: 8px; }
 .context-box[data-bias="BEARISH"] { border-color: #ef5350; } .context-box[data-bias="BULLISH"] { border-color: #26a69a; }
 .ctx-head { color: var(--muted); } .ctx-na { color: var(--muted); font-style: italic; }
+.ctx-flags { color: var(--muted); font-size: 10px; }

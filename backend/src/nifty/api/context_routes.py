@@ -53,6 +53,7 @@ class StateOut(BaseModel):
     exp_move_pts: float | None = None
     day_move_pts: float | None = None
     na_reason: str | None = None
+    flags: list[str]
 
 
 class ContextOut(BaseModel):
