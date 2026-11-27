@@ -12,6 +12,7 @@ from nifty.api import context_routes
 from nifty.contracts import Bar, Instrument
 from nifty.db.bars import upsert_bars
 from nifty.db.chart import set_pref
+from nifty.db.context import load_day
 from nifty.db.instruments import upsert_instrument
 from nifty.options.bs import bs, years_to_expiry
 from nifty.timeutil import IST
@@ -154,3 +155,15 @@ def test_context_unknown_underlying(seeded: Any) -> None:
     assert c.get("/api/v1/context", params={"underlying": "SENSEX"}).status_code == 404
     c.cookies.clear()
     assert c.get("/api/v1/context").status_code == 401
+
+
+def test_load_day_has_no_lookahead(seeded: Any) -> None:
+    _, eng = seeded
+    now = datetime.combine(DAY, time(9, 45), tzinfo=IST).astimezone(UTC)
+    last = now - timedelta(minutes=1)  # the 09:44 bar is the last one closed by 09:45
+    with eng.connect() as conn:
+        inp = load_day(conn, "NIFTY", DAY, now)
+    assert inp.minutes and inp.minutes[-1] == last and len(inp.minutes) == 30
+    assert max(inp.spot) == last and max(inp.vix) == last
+    assert inp.options and all(o.close and max(o.close) == last for o in inp.options)
+    assert all(o.oi and max(o.oi) == last for o in inp.options)  # tick 09:44:30 <= now

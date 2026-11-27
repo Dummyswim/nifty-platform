@@ -54,15 +54,17 @@ def _closes(
 
 
 def _session_closes(conn: Connection, iid: str, before: date, n: int) -> list[tuple[date, float]]:
-    """Last 1m close of each of the newest n sessions before `before`, newest first."""
+    """Last 1m close of each of the newest n sessions before `before`, newest first. Reads a
+    bounded window: n sessions span about n*7/5 calendar days, plus 30 days of holiday slack."""
+    hi = _bounds(before)[0]
     rows = conn.execute(
         text(
             f"SELECT DISTINCT ON (d) d, close FROM (SELECT {_SESSION_DAY} AS d, b.bar_start_utc, "
             "b.revision, b.close FROM bars b WHERE b.instrument_id = :i AND b.timeframe = '1m' "
-            "AND b.bar_start_utc < :lo) t ORDER BY d DESC, bar_start_utc DESC, revision DESC "
-            "LIMIT :n"
+            "AND b.bar_start_utc >= :lo AND b.bar_start_utc < :hi) t "
+            "ORDER BY d DESC, bar_start_utc DESC, revision DESC LIMIT :n"
         ),
-        {"i": iid, "lo": _bounds(before)[0], "n": n},
+        {"i": iid, "lo": hi - timedelta(days=n * 7 // 5 + 30), "hi": hi, "n": n},
     )
     return [(r[0], float(r[1])) for r in rows]
 

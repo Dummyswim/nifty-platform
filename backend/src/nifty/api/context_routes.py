@@ -1,6 +1,7 @@
 """Market context: per-minute VIX rank, CE/PE premium verdicts, option writing and bias."""
 
 import json
+import threading
 from datetime import UTC, date, datetime
 from datetime import date as Day  # `date` is also a ContextOut field
 from typing import Any
@@ -20,6 +21,7 @@ router = APIRouter(dependencies=[Depends(require_user)])
 
 _CACHE_MAX = 16
 _CACHE: dict[tuple[str, date, int | None, str], "ContextOut"] = {}
+_CACHE_LOCK = threading.Lock()  # sync routes run in the threadpool
 _OPTION_PREFS = ("options.r", "options.max_stale_s", "options.window_steps")
 
 
@@ -63,7 +65,8 @@ class ContextOut(BaseModel):
 
 
 def clear_cache() -> None:
-    _CACHE.clear()
+    with _CACHE_LOCK:
+        _CACHE.clear()
 
 
 @router.get("/context", response_model=ContextOut)
@@ -89,13 +92,16 @@ def context(
         cfg = {"params": params, **{k: prefs.get(k) for k in _OPTION_PREFS}}
         key = (underlying, sess, None if last is None else int(last.timestamp()),
                json.dumps(cfg, sort_keys=True))  # fmt: skip
-        if key in _CACHE:
-            return _CACHE[key]
+        with _CACHE_LOCK:
+            hit = _CACHE.get(key)
+        if hit is not None:
+            return hit
         inp = load_day(c, underlying, sess, now, prefs)
     expiry, series, notes = build_series(inp, p)
     out = ContextOut(underlying=underlying, date=sess, expiry=expiry, params=params,
                      series=[StateOut.model_validate(s) for s in series], notes=notes)  # fmt: skip
-    if len(_CACHE) >= _CACHE_MAX:
-        del _CACHE[next(iter(_CACHE))]  # oldest insertion
-    _CACHE[key] = out
+    with _CACHE_LOCK:
+        while len(_CACHE) >= _CACHE_MAX:
+            _CACHE.pop(next(iter(_CACHE)), None)  # oldest insertion
+        _CACHE[key] = out
     return out
