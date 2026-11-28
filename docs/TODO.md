@@ -22,7 +22,3 @@ Options carry data the NIFTY index does not. Each item needs its own design befo
 - Collector provisional-bar throttle (250 ms) is shared by all instruments, so option forming candles may
   refresh less smoothly than the index (`collector/service.py:166`).
 - Option panes show only collector-recorded data; historical option candles from Kite are a later step.
-
-
-# Time clock
-- Add IST time clock in the right exterem corner as like Tradingview
