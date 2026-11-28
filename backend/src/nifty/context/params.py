@@ -26,6 +26,7 @@ class ContextParams(BaseModel):
     confirm: int = 3
     release: int = 2
     not_before: str = "09:30"
+    late_pct: float = 90  # share of the expected move used at which the day counts as late
     writing: Writing = "iv"
 
     @model_validator(mode="before")
@@ -52,6 +53,8 @@ class ContextParams(BaseModel):
             raise ValueError("w_exit must be <= w_min")
         if not 0 < self.roll_oppose <= 1:
             raise ValueError("roll_oppose must be in (0, 1]")
+        if not 0 < self.late_pct <= 200:
+            raise ValueError("late_pct must be in (0, 200]")
         for name in ("confirm", "release", "roll_min", "strikes"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be >= 1")

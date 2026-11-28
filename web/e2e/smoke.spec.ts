@@ -142,29 +142,41 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByTestId("rs-open-chart").click();
   await expect(chart).toBeVisible();
 
-  // market context boxes (one per writing rule): the oracle has no option data, so each shows an n/a line;
-  // each sidebar switch hides only its own box
-  const ctxIv = page.getByTestId("context-box-iv");
-  const ctxOi = page.getByTestId("context-box-oi");
-  for (const box of [ctxIv, ctxOi]) {
-    await expect(box).toBeVisible();
-    await expect(box).toHaveAttribute("data-na", "1");
-    await expect(box).toContainText(/n\/a|no /);
-  }
-  await expect(ctxIv).toContainText("Writing: OI + IV");
-  await expect(ctxOi).toContainText("Writing: raw OI (reel)");
+  // market context: one box with a line per writing rule; the oracle has no option data, so it shows n/a;
+  // each sidebar switch removes only its own rule line, both off hide the box; the header collapses it
+  const ctx = page.getByTestId("context-box");
+  const ruleIv = page.getByTestId("ctx-rule-iv");
+  const ruleOi = page.getByTestId("ctx-rule-oi");
+  await expect(ctx).toBeVisible();
+  await expect(ctx).toHaveAttribute("data-na", "1");
+  await expect(ctx).toContainText(/n\/a|no /);
+  await expect(ctx).toContainText("Market context");
+  await expect(ctx).toHaveAttribute("data-bias-iv", "NONE");
+  await expect(ctx).toHaveAttribute("data-bias-oi", "NONE");
+  await expect(ruleIv).toContainText("OI+IV");
+  await expect(ruleOi).toContainText("Raw OI");
   const ivToggle = page.getByLabel("Toggle market context OI+IV");
   const oiToggle = page.getByLabel("Toggle market context raw OI");
   await ivToggle.click();
-  await expect(ctxIv).toHaveCount(0);
-  await expect(ctxOi).toBeVisible();
+  await expect(ruleIv).toHaveCount(0);
+  await expect(ctx).not.toHaveAttribute("data-bias-iv", /.*/);
+  await expect(ruleOi).toBeVisible();
+  await oiToggle.click();
+  await expect(ctx).toHaveCount(0);
   await ivToggle.click();
-  await expect(ctxIv).toBeVisible();
+  await expect(ruleIv).toBeVisible();
+  await expect(ruleOi).toHaveCount(0);
+  await expect(ctx).not.toHaveAttribute("data-bias-oi", /.*/);
   await oiToggle.click();
-  await expect(ctxOi).toHaveCount(0);
-  await expect(ctxIv).toBeVisible();
-  await oiToggle.click();
-  await expect(ctxOi).toBeVisible();
+  await expect(ruleOi).toBeVisible();
+  const head = page.getByTestId("ctx-head");
+  await head.click();
+  await expect(ctx).toHaveAttribute("data-collapsed", "1");
+  await expect(head).toHaveText("– NONE (IV) · – NONE (OI) · room n/a");
+  await expect(ruleIv).toHaveCount(0);
+  await head.click();
+  await expect(ctx).not.toHaveAttribute("data-collapsed", /.*/);
+  await expect(ruleIv).toBeVisible();
 
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();

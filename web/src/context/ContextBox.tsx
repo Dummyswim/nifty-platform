@@ -1,44 +1,69 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client";
-import type { ContextOut, ContextSide } from "../api/schemas";
+import type { ContextOut } from "../api/schemas";
+import { collapsedLine, hhmm, moveLine, ruleLine, RULE_LABEL, vixLine, wallsLine } from "./format";
 import { boxView } from "./pick";
 import type { ContextWriting } from "./useMarketContext";
 
-export const WRITING_TITLE: Record<ContextWriting, string> = { iv: "Writing: OI + IV", oi: "Writing: raw OI (reel)" };
 const TOGGLE: Record<ContextWriting, { pref: string; label: string }> = {
   iv: { pref: "context.show_iv", label: "OI+IV" },
   oi: { pref: "context.show_oi", label: "raw OI" },
 };
 
-const hhmm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16); // IST
-const signed = (v: number, d: number) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
-const side = (name: string, s: ContextSide) => `${name} IV ${s.iv!.toFixed(1)}${s.verdict ? ` ${s.verdict}` : ""}`;
+export interface ContextRule { writing: ContextWriting; data?: ContextOut; error?: unknown }
 
-export function ContextBox({ writing, data, error, cursor }: { writing: ContextWriting; data?: ContextOut; error?: unknown; cursor: number | null }) {
-  const { state: s, note, flags } = boxView(data, cursor, error);
+// collapse is a per-viewer convenience: storage may be missing or throw (private mode, blocked site data)
+const storeKey = (pane: number) => `ctx-collapsed:${pane}`;
+function readCollapsed(pane: number): boolean {
+  try { return localStorage.getItem(storeKey(pane)) === "1"; } catch { return false; }
+}
+function writeCollapsed(pane: number, on: boolean) {
+  try { if (on) localStorage.setItem(storeKey(pane), "1"); else localStorage.removeItem(storeKey(pane)); } catch { /* convenience only */ }
+}
+
+/** One box for the enabled writing rules: shared lines from the iv state if present, else oi; one line per rule. */
+export function ContextBox({ paneIndex, rules, cursor }: { paneIndex: number; rules: ContextRule[]; cursor: number | null }) {
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(paneIndex));
+  const views = rules.map((r) => ({ writing: r.writing, ...boxView(r.data, cursor, r.error) }));
+  const shared = views.find((v) => v.state) ?? views[0];
+  const s = shared?.state ?? null;
   const na = !s || !!s.na_reason;
+  const flags = [...new Set(views.flatMap((v) => v.flags))];
   const rows: string[] = [];
-  if (s && !note) {
-    if (s.vix != null) rows.push(`VIX ${s.vix.toFixed(1)}${s.vix_rank != null ? `  P${Math.round(s.vix_rank)}` : ""}${s.vix_high ? "  HIGH" : ""}`);
-    const iv = [s.ce.iv != null && side("CE", s.ce), s.pe.iv != null && side("PE", s.pe)].filter(Boolean);
-    if (iv.length) rows.push(iv.join(" · "));
-    if (s.straddle_prem != null) rows.push(`Straddle ${Math.round(s.straddle_prem)}${s.fair_straddle_prem != null ? ` / fair ${Math.round(s.fair_straddle_prem)}` : ""}`);
-    if (s.w_day != null) {
-      const who = s.w_day < 0 ? "CALL" : s.w_day > 0 ? "PUT" : "—";
-      rows.push(`Writing ${who} ${signed(s.w_day, 2)}${s.w_roll != null ? ` (15m ${signed(s.w_roll, 2)})` : ""}`);
-    }
-    if (s.bias === "BEARISH" || s.bias === "BULLISH") {
-      const since = s.bias_since != null ? `  since ${hhmm(s.bias_since)}` : "";
-      rows.push(s.bias === "BEARISH" ? `▼ BEARISH · buy PE ok${since}` : `▲ BULLISH · buy CE ok${since}`);
-    } else rows.push("NO BIAS");
-    if (s.day_move_pts != null && s.exp_move_pts != null)
-      rows.push(`Move ${signed(Math.round(s.day_move_pts), 0)} / ±${Math.round(s.exp_move_pts)} · ${Math.round((Math.abs(s.day_move_pts) / s.exp_move_pts) * 100)} %`);
+  if (s && !shared.note) {
+    const v = vixLine(s);
+    if (v) rows.push(v);
   }
+  if (s) {
+    const m = moveLine(s);
+    if (m) rows.push(m);
+    const w = wallsLine(s.call_wall, s.put_wall);
+    if (w) rows.push(w);
+  }
+  const toggle = () => { setCollapsed(!collapsed); writeCollapsed(paneIndex, !collapsed); };
+  const bias = (v: (typeof views)[number]) => v.state?.bias ?? "NONE";
+  const attrs = Object.fromEntries(views.map((v) => [`data-bias-${v.writing}`, bias(v)]));
   return (
-    <div className="context-box" data-testid={`context-box-${writing}`} data-bias={s?.bias ?? "NONE"} data-na={na ? "1" : undefined}>
-      <div className="ctx-head">{WRITING_TITLE[writing]}{s && ` ${hhmm(s.t)}`}</div>
-      {note ? <div className="ctx-na">{note}</div> : rows.map((r) => <div key={r}>{r}</div>)}
-      {flags.length > 0 && <div className="ctx-flags">{flags.join(" · ")}</div>}
+    <div className="context-box" data-testid="context-box" data-na={na ? "1" : undefined} data-collapsed={collapsed ? "1" : undefined} {...attrs}>
+      <div className="ctx-head" data-testid="ctx-head" role="button" tabIndex={0} title={collapsed ? "Expand" : "Collapse"} onClick={toggle}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}>
+        {collapsed
+          ? collapsedLine(views.map((v) => [v.writing, bias(v)]), s?.room_left_pts, s?.late)
+          : `Market context${s ? ` ${hhmm(s.t)}` : ""}`}
+      </div>
+      {!collapsed && (
+        <>
+          {shared?.note && <div className="ctx-na">{shared.note}</div>}
+          {rows.map((r) => <div key={r}>{r}</div>)}
+          {views.map((v) => (
+            <div key={v.writing} className="ctx-rule" data-testid={`ctx-rule-${v.writing}`} data-bias={bias(v)}>
+              {v.state && !v.note ? ruleLine(v.writing, v.state) : `${RULE_LABEL[v.writing]} ${v.note === shared.note ? "n/a" : v.note}`}
+            </div>
+          ))}
+          {flags.length > 0 && <div className="ctx-flags">{flags.join(" · ")}</div>}
+        </>
+      )}
     </div>
   );
 }

@@ -137,6 +137,12 @@ def test_context_bias_on_seeded_day(seeded: Any) -> None:
     assert last["ce"]["own_iv"] == pytest.approx(15.0, abs=0.1)  # 3 prior sessions with bars
     assert last["rv"] is not None and body["params"]["band_pct"] == 10
     assert all(x["flags"] == [] for x in s) and body["notes"] == []
+    # equal OI on every strike: the walls are the strike nearest spot 25970.5
+    assert last["call_wall"] == {"strike": 25950.0, "oi": 159_000.0, "edge": False}
+    assert last["put_wall"] == {"strike": 25950.0, "oi": 129_500.0, "edge": False}
+    exp, move = last["exp_move_pts"], last["day_move_pts"]
+    assert last["room_left_pts"] == pytest.approx(exp - abs(move))
+    assert last["late"] is False and last["used_pct"] == pytest.approx(abs(move) / exp * 100)
     assert _get(c) == body  # served again (cached) unchanged
 
 

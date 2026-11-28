@@ -109,6 +109,8 @@ def test_params_forbid_extra() -> None:
         {"not_before": "9.30"},
         {"not_before": "25:00"},
         {"not_before": "09:30:00"},
+        {"late_pct": 0},
+        {"late_pct": 200.1},
     ],
 )
 def test_params_reject_inconsistent(bad: dict[str, object]) -> None:
@@ -118,7 +120,9 @@ def test_params_reject_inconsistent(bad: dict[str, object]) -> None:
 
 def test_params_accept_boundaries() -> None:
     ContextParams.model_validate({"exit_pct": 10, "vix_exit_pct": 70, "w_exit": 0.5, "roll_oppose": 1,
-                                  "confirm": 1, "release": 1, "roll_min": 1, "strikes": 1})  # fmt: skip
+                                  "confirm": 1, "release": 1, "roll_min": 1, "strikes": 1,
+                                  "late_pct": 200})  # fmt: skip
+    assert ContextParams().late_pct == 90
 
 
 def test_params_per_rule_threshold_defaults() -> None:

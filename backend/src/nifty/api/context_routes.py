@@ -32,6 +32,12 @@ class SideOut(BaseModel):
     note: str | None = None
 
 
+class WallOut(BaseModel):
+    strike: float
+    oi: float
+    edge: bool
+
+
 class StateOut(BaseModel):
     t: int
     vix: float | None = None
@@ -52,6 +58,11 @@ class StateOut(BaseModel):
     bias_since: int | None = None
     exp_move_pts: float | None = None
     day_move_pts: float | None = None
+    room_left_pts: float | None = None
+    used_pct: float | None = None
+    late: bool | None = None
+    call_wall: WallOut | None = None
+    put_wall: WallOut | None = None
     na_reason: str | None = None
     flags: list[str]
     writing: str

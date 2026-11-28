@@ -58,6 +58,12 @@ class Side(TypedDict):
     note: str | None
 
 
+class Wall(TypedDict):
+    strike: float
+    oi: float
+    edge: bool  # the outermost recorded strike of its side: the true wall may lie beyond
+
+
 class State(TypedDict):
     t: int
     vix: float | None
@@ -78,6 +84,11 @@ class State(TypedDict):
     bias_since: int | None
     exp_move_pts: float | None
     day_move_pts: float | None
+    room_left_pts: float | None
+    used_pct: float | None
+    late: bool | None
+    call_wall: Wall | None
+    put_wall: Wall | None
     na_reason: str | None
     flags: list[str]  # facts about this minute only (FLAG_*)
     writing: str  # the writing rule behind w_day / w_roll / one_sided
@@ -151,6 +162,37 @@ class _Carry:
     run_cand: str = "NONE"
     run: int = 0
     miss: int = 0
+
+
+def room_left(
+    exp_move_pts: float | None, day_move_pts: float | None, late_pct: float
+) -> tuple[float | None, float | None, bool | None]:  # fmt: skip
+    """(room left in points, share of the expected move used in %, late)."""
+    if exp_move_pts is None or day_move_pts is None or exp_move_pts == 0:
+        return None, None, None
+    used = abs(day_move_pts) / exp_move_pts * 100
+    return exp_move_pts - abs(day_move_pts), used, used >= late_pct
+
+
+def _walls(
+    opts: list[tuple[OptSeries, _Track, _Track]], m: datetime, spot: float | None,
+    max_stale_s: float,
+) -> dict[bool, Wall | None]:  # fmt: skip
+    """Per side, the strike with the largest carried OI at m; ties go to the strike nearer spot."""
+    out: dict[bool, Wall | None] = {}
+    for is_call in (True, False):
+        side = [
+            (o.strike, oi_tr.at(m, max_stale_s)) for o, _, oi_tr in opts if o.is_call == is_call
+        ]
+        live = [(k, oi) for k, oi in side if oi is not None]
+        if not live:
+            out[is_call] = None
+            continue
+        near = (lambda k: -abs(k - spot)) if spot is not None else (lambda k: 0.0)
+        k, oi = max(live, key=lambda x: (x[1], near(x[0]), -x[0]))
+        outer = max(x[0] for x in live) if is_call else min(x[0] for x in live)
+        out[is_call] = Wall(strike=k, oi=oi, edge=k == outer)
+    return out
 
 
 def _no_expiry_reason(day: date, expiries: Sequence[date]) -> str:
@@ -353,13 +395,18 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
         exp_move = None
         if prev is not None and vix_open is not None:
             exp_move = vol.expected_move_pts(prev, vix_open)
+        day_move = spot_m - prev if prev is not None and spot_m is not None else None
+        room, used, late = room_left(exp_move, day_move, p.late_pct)
+        walls = _walls(opts, m, spot_m, inp.max_stale_s)
         out.append(State(
             t=t, vix=vix_m, vix_rank=rank, vix_high=vix_high, ce=sides[True], pe=sides[False],
             rv=inp.rv, straddle_prem=straddle, fair_straddle_prem=fair, w_day=w_day, w_roll=w_roll,
             oi_ce=oi_ce, oi_pe=oi_pe, one_sided=os_, candidate=cand, bias=carry.bias,
             bias_since=carry.since,
             exp_move_pts=exp_move,
-            day_move_pts=spot_m - prev if prev is not None and spot_m is not None else None,
+            day_move_pts=day_move,
+            room_left_pts=room, used_pct=used, late=late,
+            call_wall=walls[True], put_wall=walls[False],
             na_reason=na,
             flags=[f for f, on in ((FLAG_EXPIRY_DAY, expiry_day), (FLAG_FIRST_TICK, first_tick))
                    if on],

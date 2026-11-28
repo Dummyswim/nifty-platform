@@ -108,10 +108,15 @@ export function ChartPane(p: ChartPaneProps) {
         keysEnabled={p.active}
       />
       {(showIv || showOi) && (
-        <div className="context-stack">
-          {showIv && <ContextBox writing="iv" data={mctxIv.data} error={mctxIv.error} cursor={cursor} />}
-          {showOi && <ContextBox writing="oi" data={mctxOi.data} error={mctxOi.error} cursor={cursor} />}
-        </div>
+        <ContextBox
+          key={p.index}
+          paneIndex={p.index}
+          cursor={cursor}
+          rules={[
+            ...(showIv ? [{ writing: "iv" as const, ...mctxIv }] : []),
+            ...(showOi ? [{ writing: "oi" as const, ...mctxOi }] : []),
+          ]}
+        />
       )}
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(

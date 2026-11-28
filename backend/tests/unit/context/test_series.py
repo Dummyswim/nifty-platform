@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, time, timedelta
 import pytest
 
 from nifty.context.params import ContextParams
-from nifty.context.series import DayInputs, OptSeries, build_series, choose_expiry
+from nifty.context.series import DayInputs, OptSeries, build_series, choose_expiry, room_left
 from nifty.options.bs import bs, years_to_expiry
 from nifty.timeutil import IST
 
@@ -291,6 +291,91 @@ def test_no_lookahead() -> None:
                               o.prev_close, o.prev_oi) for o in full.options],
     })  # fmt: skip
     assert build_series(trunc, P)[1] == build_series(full, P)[1][:25]
+
+
+def test_no_lookahead_walls() -> None:
+    # CE OI peaks at 26200 until the cut, then 26100 builds past it: walls at m <= cut unchanged
+    def ce(i: int, k: float) -> float:
+        return 5000.0 + (k == 26200) * 1000 + (k == 26100) * 100 * max(0, i - 24)
+
+    full = make_day(ce_oi=ce)
+    cut = MINUTES[24]
+
+    def trim(d: dict[datetime, float]) -> dict[datetime, float]:
+        return {m: v for m, v in d.items() if m <= cut}
+
+    trunc = DayInputs(**{
+        **full.__dict__,
+        "minutes": MINUTES[:25],
+        "spot": trim(full.spot),
+        "vix": trim(full.vix),
+        "options": [OptSeries(o.strike, o.is_call, o.expiry, trim(o.close), trim(o.oi),
+                              o.prev_close, o.prev_oi) for o in full.options],
+    })  # fmt: skip
+    s_full, s_cut = build_series(full, P)[1], build_series(trunc, P)[1]
+    walls = [(x["call_wall"], x["put_wall"]) for x in s_cut]
+    assert walls == [(x["call_wall"], x["put_wall"]) for x in s_full[:25]]
+    assert all(w is not None and w["strike"] == 26200 for w, _ in walls)
+    w = s_full[-1]["call_wall"]
+    assert w is not None and w["strike"] == 26100  # later OI moves the wall in the full day
+
+
+def test_room_left() -> None:
+    room, used, late = room_left(275.0, -160.0, 90)
+    assert room == 115.0 and used == pytest.approx(58.18, abs=0.01) and late is False
+    room, used, late = room_left(275.0, -250.0, 90)
+    assert room == 25.0 and used == pytest.approx(90.909, abs=0.001) and late is True
+    assert room_left(275.0, 300.0, 90)[0] == -25.0  # may go negative
+    assert room_left(None, -160.0, 90) == (None, None, None)
+    assert room_left(275.0, None, 90) == (None, None, None)
+    assert room_left(0.0, 10.0, 90) == (None, None, None)
+
+
+def test_room_in_series() -> None:
+    _, s, _ = build_series(make_day(spot=falling_spot), ContextParams(late_pct=1))
+    x = s[20]
+    exp, move = x["exp_move_pts"], x["day_move_pts"]
+    assert exp is not None and move is not None
+    assert x["room_left_pts"] == pytest.approx(exp - abs(move))
+    assert x["used_pct"] == pytest.approx(abs(move) / exp * 100)
+    assert x["late"] is True  # 1 % used is late at late_pct 1
+
+
+def peaked(top: float) -> Callable[[int, float], float]:
+    return lambda i, k: 10_000.0 - abs(k - top)
+
+
+def test_walls_max_oi_per_side() -> None:
+    _, s, _ = build_series(make_day(ce_oi=peaked(26200), pe_oi=peaked(25800)), P)
+    assert s[10]["call_wall"] == {"strike": 26200.0, "oi": 10_000.0, "edge": False}
+    assert s[10]["put_wall"] == {"strike": 25800.0, "oi": 10_000.0, "edge": False}
+
+
+def test_walls_tie_nearer_spot_and_edge() -> None:
+    # flat PE OI: every strike ties, the one nearest spot 26000 wins; CE max at the top strike
+    _, s, _ = build_series(make_day(ce_oi=peaked(26300)), P)
+    assert s[5]["put_wall"] == {"strike": 26000.0, "oi": 1000.0, "edge": False}
+    assert s[5]["call_wall"] == {"strike": 26300.0, "oi": 10_000.0, "edge": True}
+    _, s, _ = build_series(make_day(pe_oi=peaked(25700)), P)
+    assert s[5]["put_wall"] == {"strike": 25700.0, "oi": 10_000.0, "edge": True}
+
+
+def test_wall_stale_strike_drops_out() -> None:
+    def oi_alive(i: int, k: float, is_call: bool) -> bool:
+        return not (is_call and k == 26200 and i >= 20)
+
+    inp = make_day(ce_oi=peaked(26200), oi_alive=oi_alive)
+    _, s, _ = build_series(inp, P)
+    w = s[21]["call_wall"]
+    assert w is not None and w["strike"] == 26200  # last OI 120 s old: still carried
+    w = s[22]["call_wall"]
+    # 26150 and 26250 tie at 9950: the one nearer spot 26000
+    assert w == {"strike": 26150.0, "oi": 9950.0, "edge": False}
+
+
+def test_walls_none_without_oi() -> None:
+    _, s, _ = build_series(make_day(oi_alive=lambda i, k, c: c), P)
+    assert s[5]["put_wall"] is None and s[5]["call_wall"] is not None
 
 
 def test_side_notes() -> None:

@@ -1558,6 +1558,14 @@ export interface components {
             exp_move_pts?: number | null;
             /** Day Move Pts */
             day_move_pts?: number | null;
+            /** Room Left Pts */
+            room_left_pts?: number | null;
+            /** Used Pct */
+            used_pct?: number | null;
+            /** Late */
+            late?: boolean | null;
+            call_wall?: components["schemas"]["WallOut"] | null;
+            put_wall?: components["schemas"]["WallOut"] | null;
             /** Na Reason */
             na_reason?: string | null;
             /** Flags */
@@ -1674,6 +1682,15 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WallOut */
+        WallOut: {
+            /** Strike */
+            strike: number;
+            /** Oi */
+            oi: number;
+            /** Edge */
+            edge: boolean;
         };
         /** WindowBar */
         WindowBar: {
