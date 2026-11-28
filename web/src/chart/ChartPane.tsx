@@ -3,6 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
+import { ContextBox, ContextToggle } from "../context/ContextBox";
+import { contextDate } from "../context/pick";
+import { useMarketContext } from "../context/useMarketContext";
 import { EnginePanel } from "../indicators/EnginePanel";
 import { IndicatorPanel } from "../indicators/IndicatorPanel";
 import { useIndicators } from "../indicators/useIndicators";
@@ -37,7 +40,16 @@ export function ChartPane(p: ChartPaneProps) {
   const focus = useUi((s) => s.focus);
   const cursor = useReplay((r) => r.cursor);
   const instruments = useQuery({ queryKey: ["instruments"], queryFn: () => api<InstrumentOut[]>("/instruments") });
-  const iid = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol)?.instrument_id;
+  const inst = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol);
+  const iid = inst?.instrument_id;
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
+  const niftyIndex = p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50";
+  const showIv = niftyIndex && prefs.data?.["context.show_iv"] !== false;
+  const showOi = niftyIndex && prefs.data?.["context.show_oi"] !== false;
+  const [lastBarT, setLastBarT] = useState<number | null>(null);
+  const istDate = contextDate(p.live, cursor, lastBarT);
+  const mctxIv = useMarketContext("NIFTY", p.live, istDate, "iv", showIv);
+  const mctxOi = useMarketContext("NIFTY", p.live, istDate, "oi", showOi);
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
   // option contracts: the collector runs no engines for them, so Live re-runs the History path per finalized bar
   const [finalized, setFinalized] = useState(0);
@@ -54,7 +66,7 @@ export function ChartPane(p: ChartPaneProps) {
   // the replay bar steps the active pane's bars: hand them over whenever this pane becomes active
   const onTimes = p.onTimes;
   const lastTimes = useRef<number[]>([]);
-  const reportTimes = (t: number[]) => { lastTimes.current = t; setNBars(t.length); onTimes?.(t); };
+  const reportTimes = (t: number[]) => { lastTimes.current = t; setNBars(t.length); setLastBarT(t.length ? t[t.length - 1] : null); onTimes?.(t); };
   useEffect(() => { if (p.active) onTimes?.(lastTimes.current); }, [p.active, onTimes]);
   const note = nBars < 0 ? null : paneNote(p.pane.kind, nBars);
   const bn = banner(sub.state, sub.socket);
@@ -97,6 +109,17 @@ export function ChartPane(p: ChartPaneProps) {
         syncIndex={p.index}
         keysEnabled={p.active}
       />
+      {(showIv || showOi) && (
+        <ContextBox
+          key={p.index}
+          paneIndex={p.index}
+          cursor={cursor}
+          rules={[
+            ...(showIv ? [{ writing: "iv" as const, ...mctxIv }] : []),
+            ...(showOi ? [{ writing: "oi" as const, ...mctxOi }] : []),
+          ]}
+        />
+      )}
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
@@ -106,7 +129,10 @@ export function ChartPane(p: ChartPaneProps) {
         p.bannerSlot,
       )}
       {p.active && p.sidebarSlot && createPortal(
-        <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />,
+        <div className="side">
+          {niftyIndex && <><ContextToggle writing="iv" /><ContextToggle writing="oi" /></>}
+          <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
+        </div>,
         p.sidebarSlot,
       )}
       {p.active && p.cardsSlot && createPortal(

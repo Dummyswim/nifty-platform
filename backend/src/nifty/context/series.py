@@ -1,0 +1,415 @@
+"""Per-minute context state for one session. State at minute m uses only data keyed <= m."""
+
+from bisect import bisect_right
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
+from functools import lru_cache
+from typing import TypedDict
+
+from nifty.context import vol, writing
+from nifty.context.params import ContextParams
+from nifty.context.vol import Verdict
+from nifty.context.writing import Leg
+from nifty.options.bs import implied_vol, years_to_expiry
+from nifty.options.chain import atm, strike_step
+from nifty.timeutil import to_ist
+
+NA_RATE = "IV n/a: set rate in Settings"
+FLAG_FIRST_TICK = "writing since first tick"
+FLAG_EXPIRY_DAY = "expiry day: next weekly"
+_BAR = timedelta(seconds=60)
+_VIX_MIN = 200  # same minimum as vol.vix_rank
+
+
+@dataclass(frozen=True)
+class OptSeries:
+    strike: float
+    is_call: bool
+    expiry: date
+    close: dict[datetime, float]  # keyed by 1m bar start UTC
+    oi: dict[datetime, float]
+    prev_close: float | None  # previous session's last values
+    prev_oi: float | None
+
+
+@dataclass(frozen=True)
+class DayInputs:
+    day: date
+    minutes: list[datetime]  # session 1m bar starts (UTC), closed only
+    spot: dict[datetime, float]
+    prev_spot_close: float | None
+    prev_session_close_at: datetime | None  # 15:30 IST of the previous session (UTC)
+    vix: dict[datetime, float]
+    vix_prior_closes: list[float]
+    own_iv: dict[tuple[str, bool], float]  # ("weekly", is_call) -> median ATM IV; missing = n/a
+    rv: float | None
+    r: float | None
+    max_stale_s: float
+    expiries: list[date]  # listed weekly expiries, sorted
+    options: list[OptSeries]
+    window_steps: int  # recorded strike window, steps either side of ATM
+
+
+class Side(TypedDict):
+    iv: float | None
+    verdict: str | None
+    own_iv: float | None
+    note: str | None
+
+
+class Wall(TypedDict):
+    strike: float
+    oi: float
+    edge: bool  # the outermost recorded strike of its side: the true wall may lie beyond
+
+
+class State(TypedDict):
+    t: int
+    vix: float | None
+    vix_rank: float | None
+    vix_high: bool | None
+    ce: Side
+    pe: Side
+    rv: float | None
+    straddle_prem: float | None
+    fair_straddle_prem: float | None
+    w_day: float | None
+    w_roll: float | None
+    oi_ce: float | None
+    oi_pe: float | None
+    one_sided: int | None
+    candidate: str
+    bias: str
+    bias_since: int | None
+    exp_move_pts: float | None
+    day_move_pts: float | None
+    room_left_pts: float | None
+    used_pct: float | None
+    late: bool | None
+    call_wall: Wall | None
+    put_wall: Wall | None
+    na_reason: str | None
+    flags: list[str]  # facts about this minute only (FLAG_*)
+    writing: str  # the writing rule behind w_day / w_roll / one_sided
+
+
+def choose_expiry(day: date, expiries: Sequence[date]) -> date | None:
+    """Nearest listed expiry on/after day; on the expiry day itself the next one."""
+    later = [e for e in sorted(expiries) if e >= day]
+    if later and later[0] == day:
+        later = later[1:]
+    return later[0] if later else None
+
+
+@lru_cache(maxsize=1 << 16)
+def _implied_vol_cached(
+    price: float, s: float, k: float, t: float, r: float, is_call: bool
+) -> float | None:  # fmt: skip
+    return implied_vol(price, s, k, t, r, is_call)
+
+
+def _implied_vol(
+    price: float, s: float, k: float, t: float, r: float, is_call: bool
+) -> float | None:  # fmt: skip
+    """`implied_vol` memoised on rounded inputs: one bisection per (contract, minute)."""
+    return _implied_vol_cached(round(price, 4), round(s, 4), k, round(t, 12), r, is_call)
+
+
+def atm_side_iv(
+    spot: float, closes_by_strike: dict[float, float], expiry: date, at: datetime, r: float,
+    is_call: bool,
+) -> float | None:  # fmt: skip
+    """IV (vol points) at spot, interpolated between the two strikes bracketing it."""
+    lo = max((k for k in closes_by_strike if k <= spot), default=None)
+    hi = min((k for k in closes_by_strike if k >= spot), default=None)
+    if lo is None or hi is None:
+        return None
+    t = years_to_expiry(expiry, at)
+    iv_lo = _implied_vol(closes_by_strike[lo], spot, lo, t, r, is_call)
+    iv_hi = _implied_vol(closes_by_strike[hi], spot, hi, t, r, is_call)
+    if iv_lo is None or iv_hi is None:
+        return None
+    return vol.interp_iv(spot, (lo, iv_lo * 100.0), (hi, iv_hi * 100.0))
+
+
+class _Track:
+    """Sorted view of one keyed series with stale-limited carry-forward."""
+
+    def __init__(self, data: dict[datetime, float]) -> None:
+        self.keys = sorted(data)
+        self.vals = [data[k] for k in self.keys]
+
+    def at(self, m: datetime, max_stale_s: float) -> float | None:
+        i = bisect_right(self.keys, m) - 1
+        if i < 0 or (m - self.keys[i]).total_seconds() > max_stale_s:
+            return None
+        return self.vals[i]
+
+    def first(self, m: datetime) -> float | None:
+        return self.vals[0] if self.keys and self.keys[0] <= m else None
+
+    def before_data(self, m: datetime) -> bool:
+        return not self.keys or m < self.keys[0]
+
+
+@dataclass
+class _Carry:
+    verdict: dict[bool, Verdict | None] = field(default_factory=lambda: {True: None, False: None})
+    vix_high: bool = False
+    bias: str = "NONE"
+    since: int | None = None
+    run_cand: str = "NONE"
+    run: int = 0
+    miss: int = 0
+
+
+def room_left(
+    exp_move_pts: float | None, day_move_pts: float | None, late_pct: float
+) -> tuple[float | None, float | None, bool | None]:  # fmt: skip
+    """(room left in points, share of the expected move used in %, late)."""
+    if exp_move_pts is None or day_move_pts is None or exp_move_pts == 0:
+        return None, None, None
+    used = abs(day_move_pts) / exp_move_pts * 100
+    return exp_move_pts - abs(day_move_pts), used, used >= late_pct
+
+
+def _walls(
+    opts: list[tuple[OptSeries, _Track, _Track]], m: datetime, spot: float | None,
+    max_stale_s: float,
+) -> dict[bool, Wall | None]:  # fmt: skip
+    """Per side, the strike with the largest carried OI at m; ties go to the strike nearer spot."""
+    out: dict[bool, Wall | None] = {}
+    for is_call in (True, False):
+        side = [
+            (o.strike, oi_tr.at(m, max_stale_s)) for o, _, oi_tr in opts if o.is_call == is_call
+        ]
+        live = [(k, oi) for k, oi in side if oi is not None]
+        if not live:
+            out[is_call] = None
+            continue
+        near = (lambda k: -abs(k - spot)) if spot is not None else (lambda k: 0.0)
+        k, oi = max(live, key=lambda x: (x[1], near(x[0]), -x[0]))
+        outer = max(x[0] for x in live) if is_call else min(x[0] for x in live)
+        out[is_call] = Wall(strike=k, oi=oi, edge=k == outer)
+    return out
+
+
+def _no_expiry_reason(day: date, expiries: Sequence[date]) -> str:
+    if day in expiries:
+        return "expiry day: next weekly not recorded"
+    return "no recorded option expiry for this day"
+
+
+def _leg_iv(
+    o: OptSeries, c_tr: _Track, spot_tr: _Track, at: datetime, inp: DayInputs
+) -> float | None:  # fmt: skip
+    """The leg's IV (vol points) as at minute `at`: carried close and spot at `at`."""
+    c, s = c_tr.at(at, inp.max_stale_s), spot_tr.at(at, inp.max_stale_s)
+    if c is None or s is None or inp.r is None:
+        return None
+    iv = _implied_vol(c, s, o.strike, years_to_expiry(o.expiry, at + _BAR), inp.r, o.is_call)
+    return None if iv is None else iv * 100.0
+
+
+def _prev_iv(o: OptSeries, inp: DayInputs) -> float | None:
+    """IV of the previous session's last close at that session's close; None when any input
+    is missing or the IV fails."""
+    if o.prev_close is None or inp.prev_spot_close is None or inp.prev_session_close_at is None:
+        return None
+    if inp.r is None:
+        return None
+    t = years_to_expiry(o.expiry, inp.prev_session_close_at)
+    iv = _implied_vol(o.prev_close, inp.prev_spot_close, o.strike, t, inp.r, o.is_call)
+    return None if iv is None else iv * 100.0
+
+
+def _legs(
+    opts: list[tuple[OptSeries, _Track, _Track]], m: datetime, inp: DayInputs, spot_tr: _Track,
+    p: ContextParams,
+) -> tuple[list[Leg], list[Leg], dict[tuple[float, bool], float], bool]:  # fmt: skip
+    """(day legs, rolling legs, closes by (strike, is_call), used a first-tick baseline)."""
+    day_legs: list[Leg] = []
+    roll_legs: list[Leg] = []
+    closes: dict[tuple[float, bool], float] = {}
+    first_tick = False
+    r_at = m - timedelta(minutes=p.roll_min)
+    for o, c_tr, oi_tr in opts:
+        c, oi = c_tr.at(m, inp.max_stale_s), oi_tr.at(m, inp.max_stale_s)
+        if c is None:
+            continue
+        closes[(o.strike, o.is_call)] = c  # IV/straddle need only a fresh close
+        if oi is None:
+            continue
+        first_c = c_tr.keys[0]  # a carried close implies a first one <= m
+        oi_base = o.prev_oi if o.prev_oi is not None else oi_tr.first(m)
+        assert oi_base is not None  # a carried value implies a first
+        iv = _leg_iv(o, c_tr, spot_tr, m, inp)
+        iv_base = _prev_iv(o, inp)
+        first_iv = inp.r is not None and iv_base is None  # no previous IV (missing or failed)
+        if first_iv:
+            iv_base = _leg_iv(o, c_tr, spot_tr, first_c, inp)
+        first_tick |= o.prev_oi is None or (p.writing == "iv" and first_iv)
+        day_legs.append(Leg(o.is_call, oi, oi_base, iv, iv_base))
+        r_c = first_c if c_tr.before_data(r_at) else r_at
+        roi = oi_tr.first(m) if oi_tr.before_data(r_at) else oi_tr.at(r_at, inp.max_stale_s)
+        if c_tr.at(r_c, inp.max_stale_s) is not None and roi is not None:
+            roll_legs.append(Leg(o.is_call, oi, roi, iv, _leg_iv(o, c_tr, spot_tr, r_c, inp)))
+    return day_legs, roll_legs, closes, first_tick
+
+
+def _side_note(iv: float | None, own: float | None, vix_m: float | None, rv: float | None,
+               p: ContextParams) -> str | None:  # fmt: skip
+    if iv is None:
+        return None
+    notes = []
+    if (
+        own is not None
+        and vix_m is not None
+        and iv > own + vol.band(vix_m, p.band_pct, p.band_floor)
+    ):
+        notes.append("IV rich vs own 5-day")
+    if rv is not None and iv < rv:
+        notes.append("IV < RV")
+    return "; ".join(notes) or None
+
+
+def _drop_bias(c: _Carry) -> None:
+    c.bias, c.since, c.miss, c.run, c.run_cand = "NONE", None, 0, 0, "NONE"
+
+
+def _advance_bias(c: _Carry, cand: str, gated: bool, t: int, p: ContextParams) -> None:
+    if c.bias != "NONE":
+        c.miss = 0 if cand == c.bias else c.miss + 1
+        if c.miss >= p.release:
+            _drop_bias(c)
+        return
+    if gated or cand == "NONE":
+        c.run, c.run_cand = 0, "NONE"
+        return
+    c.run = c.run + 1 if cand == c.run_cand else 1
+    c.run_cand = cand
+    if c.run >= p.confirm:
+        c.bias, c.since, c.miss = cand, t, 0
+
+
+def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[State], list[str]]:
+    """(expiry used, one State per minute, day-level notes)."""
+    expiry = choose_expiry(inp.day, inp.expiries)
+    notes: list[str] = []
+    expiry_day = expiry is not None and inp.day in inp.expiries
+    opts = [(o, _Track(o.close), _Track(o.oi)) for o in inp.options if o.expiry == expiry]
+    strikes = sorted({o.strike for o in inp.options if o.expiry == expiry})
+    step = strike_step(strikes)
+    n_steps = min(p.strikes, inp.window_steps)
+    spot_tr, vix_tr = _Track(inp.spot), _Track(inp.vix)
+    not_before = time.fromisoformat(p.not_before)
+    carry = _Carry()
+    score = writing.score_iv if p.writing == "iv" else writing.score_oi
+    out: list[State] = []
+    for m in inp.minutes:
+        t = int(m.timestamp())
+        spot_m, vix_m = spot_tr.at(m, inp.max_stale_s), vix_tr.at(m, inp.max_stale_s)
+        rank = vol.vix_rank(inp.vix_prior_closes, vix_m) if vix_m is not None else None
+        if rank is None:
+            carry.vix_high = False
+        elif rank >= p.vix_pct:
+            carry.vix_high = True
+        elif rank < p.vix_exit_pct:
+            carry.vix_high = False
+        vix_high = carry.vix_high if rank is not None else None
+
+        day_legs: list[Leg] = []
+        roll_legs: list[Leg] = []
+        closes: dict[tuple[float, bool], float] = {}
+        first_tick = False
+        atm_k = atm(spot_m, strikes) if spot_m is not None else None
+        if expiry is not None and atm_k is not None and step is not None:
+            span = n_steps * step + 1e-6
+            in_play = [x for x in opts if abs(x[0].strike - atm_k) <= span]
+            day_legs, roll_legs, closes, first_tick = _legs(in_play, m, inp, spot_tr, p)
+
+        ivs: dict[bool, float | None] = {True: None, False: None}
+        if expiry is not None and spot_m is not None and inp.r is not None:
+            for is_call in (True, False):
+                side = {k: c for (k, call), c in closes.items() if call == is_call}
+                ivs[is_call] = atm_side_iv(spot_m, side, expiry, m + _BAR, inp.r, is_call)
+
+        if expiry is None:
+            na: str | None = _no_expiry_reason(inp.day, inp.expiries)
+        elif inp.r is None:
+            na = NA_RATE
+        elif len(inp.vix_prior_closes) < _VIX_MIN:
+            na = "VIX history short"
+        elif vix_m is None:
+            na = "no VIX data"
+        elif spot_m is None:
+            na = "no spot data"
+        elif not day_legs or (ivs[True] is None and ivs[False] is None):
+            na = "no option data"
+        else:
+            na = None
+
+        sides: dict[bool, Side] = {}
+        for is_call in (True, False):
+            iv = ivs[is_call]
+            v = (
+                vol.verdict(iv, vix_m, carry.verdict[is_call], p)
+                if iv is not None and vix_m is not None
+                else None
+            )
+            carry.verdict[is_call] = v if na is None else None
+            own = inp.own_iv.get(("weekly", is_call))
+            sides[is_call] = Side(iv=iv, verdict=v, own_iv=own,
+                                  note=_side_note(iv, own, vix_m, inp.rv, p))  # fmt: skip
+
+        w_day = score(day_legs) if day_legs else None
+        w_roll = score(roll_legs) if day_legs else None
+        oi_ce, oi_pe = writing.raw_oi(day_legs) if day_legs else (None, None)
+        os_: int | None = None
+        cand = "NONE"
+        if w_day is not None and w_roll is not None:
+            os_ = writing.one_sided(w_day, w_roll, p.w_min, p.roll_oppose)
+            # a shown bias holds while writing stays beyond the lower exit threshold
+            held = writing.one_sided(w_day, w_roll, p.w_exit, p.roll_oppose)
+            shown = {"BEARISH": -1, "BULLISH": 1}.get(carry.bias)
+            direction = held if held == shown else os_
+            if na is None and vix_high:
+                if direction == -1 and sides[False]["verdict"] in ("FAIR", "CHEAP"):
+                    cand = "BEARISH"
+                elif direction == 1 and sides[True]["verdict"] in ("FAIR", "CHEAP"):
+                    cand = "BULLISH"
+        if na is None:
+            _advance_bias(carry, cand, to_ist(m).time() < not_before, t, p)
+        else:  # an n/a minute never shows a bias; a new one needs `confirm` fresh minutes
+            _drop_bias(carry)
+
+        straddle = None
+        if atm_k is not None and (atm_k, True) in closes and (atm_k, False) in closes:
+            straddle = closes[(atm_k, True)] + closes[(atm_k, False)]
+        fair = None
+        if expiry is not None and spot_m is not None and vix_m is not None:
+            fair = vol.fair_straddle_prem(spot_m, vix_m, years_to_expiry(expiry, m + _BAR))
+        vix_open = vix_tr.first(m)
+        prev = inp.prev_spot_close
+        exp_move = None
+        if prev is not None and vix_open is not None:
+            exp_move = vol.expected_move_pts(prev, vix_open)
+        day_move = spot_m - prev if prev is not None and spot_m is not None else None
+        room, used, late = room_left(exp_move, day_move, p.late_pct)
+        walls = _walls(opts, m, spot_m, inp.max_stale_s)
+        out.append(State(
+            t=t, vix=vix_m, vix_rank=rank, vix_high=vix_high, ce=sides[True], pe=sides[False],
+            rv=inp.rv, straddle_prem=straddle, fair_straddle_prem=fair, w_day=w_day, w_roll=w_roll,
+            oi_ce=oi_ce, oi_pe=oi_pe, one_sided=os_, candidate=cand, bias=carry.bias,
+            bias_since=carry.since,
+            exp_move_pts=exp_move,
+            day_move_pts=day_move,
+            room_left_pts=room, used_pct=used, late=late,
+            call_wall=walls[True], put_wall=walls[False],
+            na_reason=na,
+            flags=[f for f, on in ((FLAG_EXPIRY_DAY, expiry_day), (FLAG_FIRST_TICK, first_tick))
+                   if on],
+            writing=p.writing,
+        ))  # fmt: skip
+    return expiry, out, notes
