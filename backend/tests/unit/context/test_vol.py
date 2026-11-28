@@ -99,7 +99,7 @@ def test_params_forbid_extra() -> None:
         {"band_pct": -1},
         {"exit_pct": 9},  # below band_pct 10
         {"vix_exit_pct": 71},  # above vix_pct 70
-        {"w_exit": 0.51},  # above w_min 0.5
+        {"w_min": 0.5, "w_exit": 0.51},  # above w_min
         {"roll_oppose": 0},
         {"roll_oppose": 1.1},
         {"confirm": 0},
@@ -126,3 +126,12 @@ def test_params_per_rule_threshold_defaults() -> None:
     assert (iv.w_min, iv.w_exit) == (0.5, 0.3) and (oi.w_min, oi.w_exit) == (0.25, 0.15)
     assert ContextParams(writing="oi", w_min=0.2).w_exit == 0.15
     assert ContextParams().roll_oppose == 0.5
+
+
+def test_params_single_threshold_clamps_the_other_default() -> None:
+    iv = ContextParams(writing="iv", w_min=0.2)
+    assert (iv.w_min, iv.w_exit) == (0.2, 0.2)
+    oi = ContextParams(writing="oi", w_exit=0.4)
+    assert (oi.w_min, oi.w_exit) == (0.4, 0.4)
+    with pytest.raises(ValidationError):
+        ContextParams(writing="iv", w_min=0.2, w_exit=0.3)

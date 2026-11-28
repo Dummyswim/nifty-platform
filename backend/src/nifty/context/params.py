@@ -33,6 +33,10 @@ class ContextParams(BaseModel):
     def _rule_defaults(cls, data: Any) -> Any:
         if isinstance(data, dict) and data.get("writing", "iv") in RULE_THRESHOLDS:
             w_min, w_exit = RULE_THRESHOLDS[data.get("writing", "iv")]
+            if "w_min" in data and "w_exit" not in data:
+                w_exit = min(w_exit, data["w_min"])  # keep the pair consistent
+            elif "w_exit" in data and "w_min" not in data:
+                w_min = max(w_min, data["w_exit"])
             return {"w_min": w_min, "w_exit": w_exit, **data}
         return data
 

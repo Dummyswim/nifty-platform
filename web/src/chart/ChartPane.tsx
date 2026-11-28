@@ -46,8 +46,8 @@ export function ChartPane(p: ChartPaneProps) {
   const showIv = niftyIndex && prefs.data?.["context.show_iv"] !== false;
   const showOi = niftyIndex && prefs.data?.["context.show_oi"] !== false;
   const istDate = cursor === null ? undefined : new Date((cursor + 19800) * 1000).toISOString().slice(0, 10);
-  const mctxIv = useMarketContext("NIFTY", p.live, istDate, "iv");
-  const mctxOi = useMarketContext("NIFTY", p.live, istDate, "oi");
+  const mctxIv = useMarketContext("NIFTY", p.live, istDate, "iv", showIv);
+  const mctxOi = useMarketContext("NIFTY", p.live, istDate, "oi", showOi);
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
   // option contracts: the collector runs no engines for them, so Live re-runs the History path per finalized bar
   const [finalized, setFinalized] = useState(0);

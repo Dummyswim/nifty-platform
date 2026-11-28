@@ -176,6 +176,15 @@ def test_context_per_rule_prefs(seeded: Any) -> None:
     assert (oi["w_min"], oi["w_exit"]) == (0.2, 0.15)
 
 
+def test_context_shared_pref_overrides_rule_defaults(seeded: Any) -> None:
+    c, eng = seeded
+    with eng.begin() as conn:
+        set_pref(conn, "context", {"w_min": 0.2})
+    iv, oi = _get(c)["params"], _get(c, writing="oi")["params"]
+    assert (iv["w_min"], iv["w_exit"]) == (0.2, 0.2)  # w_exit default clamped to w_min
+    assert (oi["w_min"], oi["w_exit"]) == (0.2, 0.15)
+
+
 def test_context_without_rate(seeded: Any) -> None:
     c, eng = seeded
     with eng.begin() as conn:
