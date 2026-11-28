@@ -14,6 +14,7 @@ select, input { background: #0f1420; border: 1px solid var(--line); border-radiu
 .shell > header { display: flex; align-items: center; gap: 16px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; letter-spacing: .08em; color: var(--accent); }
 nav { display: flex; gap: 6px; flex: 1; }
+.clock { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chart-page { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .seg { display: flex; gap: 2px; }

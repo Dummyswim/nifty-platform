@@ -20,6 +20,7 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
 
   const chart = page.getByTestId("chart");
   await expect(chart).toHaveAttribute("data-symbol", "NIFTY 50");
+  await expect(page.getByTestId("ist-clock")).toHaveText(/^\w{3} \d{2} \w{3} \d{4} · \d{2}:\d{2}:\d{2} IST$/);
   await expect(chart).toHaveAttribute("data-tf", "1m"); // default landing view
   await expect.poll(async () => Number(await chart.getAttribute("data-bars"))).toBeGreaterThan(1000);
   // NVS is on by default and runs on the chart's own timeframe: 18 entries on 1m (15 on 5m, checked below)

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api/client";
+import { IstClock } from "./clock";
 import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
 import { type Page, useUi } from "./store";
@@ -36,6 +37,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           {tab("options", "Options")}
           {tab("settings", "Settings")}
         </nav>
+        <IstClock />
         <button className="ghost" onClick={onLogout}>
           Sign out
         </button>
