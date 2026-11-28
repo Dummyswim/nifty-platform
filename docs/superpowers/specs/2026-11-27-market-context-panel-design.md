@@ -188,3 +188,25 @@ each with its own sidebar switch (prefs `context.show_iv`, `context.show_oi`, de
 is no longer read).
 
 **Data note:** main collector recorded no option ticks 2026-11-26 09:36–11:12 IST; the panel shows n/a there.
+
+## Addendum 2 (2026-11-27): room left, writer walls, one compact box (user choice A)
+**Why:** the user plans trades from the panel as a filter (direction), sizing (room left) and levels (walls);
+two seven-line boxes top-right covered the newest candles and price scale.
+
+**New per-minute fields (backend, shared by both rules):**
+- `room_left_pts = exp_move_pts − |day_move_pts|` (may go negative); `used_pct = |day_move| / exp_move × 100`;
+  `late = used_pct ≥ late_pct` (new param `late_pct = 90`). None when either input is None.
+- Writer walls at minute m for the chosen expiry: `call_wall` / `put_wall` = `{strike, oi, edge}` — the recorded
+  CE (PE) strike with the largest carried OI at m (same staleness rule as other legs); `edge = true` when that
+  strike is the highest (CE) / lowest (PE) recorded strike at m, i.e. the true wall may lie beyond the recorded
+  window. None when no OI. Uses only data keyed ≤ m.
+
+**Web: one combined box**, top-left under the pane legend, five lines:
+`Market context HH:MM` header; `VIX … · CE iv verdict · PE iv verdict`; `Move −160 / ±275 · 58 % · room 115`
+(`· LATE` appended when late); `Walls: CE 26,300 (6.1M) · PE 25,900 (4.8M)` (`≥` / `≤` prefix when edge);
+then one line per enabled rule: `OI+IV  CALL −0.88 ▼ BEARISH · buy PE  10:25` and
+`Raw OI CALL −0.28 ▼ BEARISH · buy PE  11:06` (`NO BIAS` when none). Flags and n/a lines as before.
+Shared lines come from whichever rule's response is available (identical by construction).
+Collapsible to one line (`▼ BEAR (IV) · ▼ BEAR (OI) · room 115`) by clicking the header; collapsed state is
+remembered per pane in browser storage (convenience only). The two sidebar switches hide their own rule line;
+the box disappears when both are off.
