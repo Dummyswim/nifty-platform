@@ -4,6 +4,8 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+IV_TOL = 0.05  # vol pts: an IV rise up to this much still counts as "not rising"
+
 
 @dataclass(frozen=True)
 class Leg:
@@ -16,9 +18,9 @@ class Leg:
 
 def writing_qty_iv(leg: Leg) -> float:
     d_oi = leg.oi - leg.oi_base
-    if d_oi > 0 and leg.iv is not None and leg.iv_base is not None and leg.iv <= leg.iv_base:
-        return d_oi
-    return 0.0
+    if d_oi <= 0 or leg.iv is None or leg.iv_base is None:
+        return 0.0
+    return d_oi if leg.iv <= leg.iv_base + IV_TOL else 0.0
 
 
 def score_iv(legs: Sequence[Leg]) -> float:

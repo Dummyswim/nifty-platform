@@ -171,9 +171,10 @@ def _leg_iv(
 
 
 def _prev_iv(o: OptSeries, inp: DayInputs) -> float | None:
-    """IV of the previous session's last close at that session's close."""
-    assert o.prev_close is not None and inp.prev_spot_close is not None
-    assert inp.prev_session_close_at is not None
+    """IV of the previous session's last close at that session's close; None when any input
+    is missing or the IV fails."""
+    if o.prev_close is None or inp.prev_spot_close is None or inp.prev_session_close_at is None:
+        return None
     if inp.r is None:
         return None
     t = years_to_expiry(o.expiry, inp.prev_session_close_at)
@@ -201,11 +202,12 @@ def _legs(
         first_c = c_tr.keys[0]  # a carried close implies a first one <= m
         oi_base = o.prev_oi if o.prev_oi is not None else oi_tr.first(m)
         assert oi_base is not None  # a carried value implies a first
-        has_prev = (o.prev_close, inp.prev_spot_close, inp.prev_session_close_at)
-        iv_prev = None not in has_prev
         iv = _leg_iv(o, c_tr, spot_tr, m, inp)
-        iv_base = _prev_iv(o, inp) if iv_prev else _leg_iv(o, c_tr, spot_tr, first_c, inp)
-        first_tick |= o.prev_oi is None or (p.writing == "iv" and not iv_prev)
+        iv_base = _prev_iv(o, inp)
+        first_iv = inp.r is not None and iv_base is None  # no previous IV (missing or failed)
+        if first_iv:
+            iv_base = _leg_iv(o, c_tr, spot_tr, first_c, inp)
+        first_tick |= o.prev_oi is None or (p.writing == "iv" and first_iv)
         day_legs.append(Leg(o.is_call, oi, oi_base, iv, iv_base))
         r_c = first_c if c_tr.before_data(r_at) else r_at
         roi = oi_tr.first(m) if oi_tr.before_data(r_at) else oi_tr.at(r_at, inp.max_stale_s)

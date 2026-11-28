@@ -222,6 +222,19 @@ def test_baseline_fallback_first_tick() -> None:
     assert s[idx(9, 32)]["bias"] == "BEARISH"
 
 
+def test_failed_prev_iv_falls_back_to_first_iv() -> None:
+    # a previous close above the no-arbitrage band has no IV: the iv rule uses today's first IV
+    inp = make_day()
+    opts = [OptSeries(o.strike, o.is_call, o.expiry, o.close, o.oi, 1e9, o.prev_oi)
+            for o in inp.options]  # fmt: skip
+    inp = DayInputs(**{**inp.__dict__, "options": opts})
+    _, s, _ = build_series(inp, P)
+    assert all(x["flags"] == ["writing since first tick"] for x in s)
+    assert s[idx(9, 32)]["w_day"] == -1.0 and s[idx(9, 32)]["bias"] == "BEARISH"
+    _, s_oi, _ = build_series(inp, P_OI)
+    assert all(x["flags"] == [] for x in s_oi)  # the oi rule has its OI baseline
+
+
 def test_first_tick_flag_only_on_minutes_using_it() -> None:
     # the only first-tick legs (no prior OI) are strikes far from ATM that enter play at k
     k = idx(9, 40)

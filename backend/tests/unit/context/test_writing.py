@@ -16,6 +16,11 @@ def test_writing_qty_iv_flat_iv_counts() -> None:
     assert writing_qty_iv(leg(True, 100, iv=14.0)) == 100
 
 
+def test_writing_qty_iv_tolerates_small_iv_rise() -> None:
+    assert writing_qty_iv(leg(True, 100, iv=14.04)) == 100  # within IV_TOL of 14.0
+    assert writing_qty_iv(leg(True, 100, iv=14.06)) == 0.0
+
+
 def test_writing_qty_iv_rising_iv_is_not_writing() -> None:
     assert writing_qty_iv(leg(True, 100, iv=14.5)) == 0.0
 
