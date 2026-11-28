@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ValidationError
 
 from nifty.api.auth import require_user
-from nifty.context.params import ContextParams
+from nifty.context.params import ContextParams, Writing
 from nifty.context.series import build_series
 from nifty.db import chart
 from nifty.db.context import last_closed_minute, load_day, session_for
@@ -20,7 +20,7 @@ from nifty.timeutil import Calendar
 router = APIRouter(dependencies=[Depends(require_user)])
 
 _CACHE_MAX = 16
-_CACHE: dict[tuple[str, date, int | None, str], "ContextOut"] = {}
+_CACHE: dict[tuple[str, date, str, int | None, str], "ContextOut"] = {}
 _CACHE_LOCK = threading.Lock()  # sync routes run in the threadpool
 _OPTION_PREFS = ("options.r", "options.max_stale_s", "options.window_steps")
 
@@ -54,10 +54,12 @@ class StateOut(BaseModel):
     day_move_pts: float | None = None
     na_reason: str | None = None
     flags: list[str]
+    writing: str
 
 
 class ContextOut(BaseModel):
     underlying: str
+    writing: str
     date: Day | None = None
     expiry: Day | None = None
     params: dict[str, Any]
@@ -72,7 +74,8 @@ def clear_cache() -> None:
 
 @router.get("/context", response_model=ContextOut)
 def context(
-    underlying: str = "NIFTY", day: date | None = Query(None, alias="date")
+    underlying: str = "NIFTY", day: date | None = Query(None, alias="date"),
+    writing: Writing = "iv",
 ) -> ContextOut:  # fmt: skip
     if underlying != "NIFTY":
         raise HTTPException(404, f"no context for {underlying}")
@@ -80,18 +83,19 @@ def context(
     with get_engine().connect() as c:
         prefs = chart.get_prefs(c)
         try:
-            p = ContextParams(**(prefs.get("context") or {}))
+            shared, own = prefs.get("context") or {}, prefs.get(f"context.{writing}") or {}
+            p = ContextParams(**{**shared, **own, "writing": writing})
         except (TypeError, ValidationError) as e:
             raise HTTPException(422, f"invalid context prefs: {e}") from e
         params = p.model_dump()
         sess = session_for(c, Calendar.load(), day, now)
         if sess is None:
             shown = day or Calendar.session_date(now)
-            return ContextOut(underlying=underlying, date=day, params=params, series=[],
-                              notes=[f"no session data for {shown}"])  # fmt: skip
+            return ContextOut(underlying=underlying, writing=writing, date=day, params=params,
+                              series=[], notes=[f"no session data for {shown}"])  # fmt: skip
         last = last_closed_minute(c, sess, now)
         cfg = {"params": params, **{k: prefs.get(k) for k in _OPTION_PREFS}}
-        key = (underlying, sess, None if last is None else int(last.timestamp()),
+        key = (underlying, sess, writing, None if last is None else int(last.timestamp()),
                json.dumps(cfg, sort_keys=True))  # fmt: skip
         with _CACHE_LOCK:
             hit = _CACHE.get(key)
@@ -99,8 +103,9 @@ def context(
             return hit
         inp = load_day(c, underlying, sess, now, prefs)
     expiry, series, notes = build_series(inp, p)
-    out = ContextOut(underlying=underlying, date=sess, expiry=expiry, params=params,
-                     series=[StateOut.model_validate(s) for s in series], notes=notes)  # fmt: skip
+    out = ContextOut(underlying=underlying, writing=writing, date=sess, expiry=expiry,
+                     params=params, series=[StateOut.model_validate(s) for s in series],
+                     notes=notes)  # fmt: skip
     with _CACHE_LOCK:
         while len(_CACHE) >= _CACHE_MAX:
             _CACHE.pop(next(iter(_CACHE)), None)  # oldest insertion

@@ -1,4 +1,5 @@
-"""Context API on a seeded nifty_test: NIFTY spot, INDIA VIX history and a call-writing session."""
+"""Context API on a seeded nifty_test: NIFTY spot, INDIA VIX history and a falling session where
+puts are written (OI up, IV easing) and calls are bought (OI up, IV rising)."""
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, time, timedelta
@@ -76,11 +77,14 @@ def seed(conn: Connection) -> None:
             t = years_to_expiry(EXPIRY, m + timedelta(minutes=1))
             for k in STRIKES:
                 for ot in ("CE", "PE"):
-                    g = bs(s, k, t, R, SIGMA, ot == "CE")
+                    sigma = SIGMA
+                    if sd == DAY:
+                        sigma = 0.16 + 0.0002 * i if ot == "CE" else SIGMA - 0.0001 * i
+                    g = bs(s, k, t, R, sigma, ot == "CE")
                     assert g is not None
                     bars.append(_bar(_cid(k, ot), m, g.price))
-                    if sd == DAY:  # calls written all day: OI up, premium down
-                        oi = 100_000 + 1_000 * i if ot == "CE" else 100_000
+                    if sd == DAY:  # OI up on both sides; only the puts' IV eases
+                        oi = 100_000 + (1_000 if ot == "CE" else 500) * i
                     elif sd == PRIOR[0]:
                         oi = 90_000 if ot == "CE" else 100_000
                     else:
@@ -127,12 +131,42 @@ def test_context_bias_on_seeded_day(seeded: Any) -> None:
     assert len(s) == 60 and all(x["t"] < now for x in s)
     last = s[-1]
     assert last["na_reason"] is None and last["vix_rank"] == 100.0 and last["vix_high"] is True
-    assert last["pe"]["verdict"] == "FAIR" and last["pe"]["iv"] == pytest.approx(15.0, abs=0.1)
-    assert last["w_day"] == -1.0 and last["bias"] == "BEARISH"
+    assert last["pe"]["verdict"] == "FAIR" and last["pe"]["iv"] == pytest.approx(14.41, abs=0.1)
+    assert body["writing"] == "iv" and all(x["writing"] == "iv" for x in s)
+    assert all(x["w_day"] == 1.0 for x in s[1:])  # put writing only: calls were bought
     assert last["ce"]["own_iv"] == pytest.approx(15.0, abs=0.1)  # 3 prior sessions with bars
     assert last["rv"] is not None and body["params"]["band_pct"] == 10
     assert all(x["flags"] == [] for x in s) and body["notes"] == []
     assert _get(c) == body  # served again (cached) unchanged
+
+
+def test_context_oi_rule_differs_on_seeded_day(seeded: Any) -> None:
+    c, _ = seeded
+    iv, oi = _get(c), _get(c, writing="oi")
+    assert oi["writing"] == "oi" and all(x["writing"] == "oi" for x in oi["series"])
+    assert oi["params"]["writing"] == "oi" and iv["params"]["writing"] == "iv"
+    last = oi["series"][-1]
+    d_ce, d_pe = 10_000 + 1_000 * 59.0, 500 * 59.0  # CE prev OI 90k, PE 100k
+    assert (last["oi_ce"], last["oi_pe"]) == (6 * d_ce, 6 * d_pe)  # ATM 25950: 25850..26100
+    assert last["w_day"] == pytest.approx((d_pe - d_ce) / (d_pe + d_ce))
+    assert last["bias"] == "BEARISH" and iv["series"][-1]["bias"] != "BEARISH"
+    assert _get(c) == iv  # the cache keeps the two rules apart
+
+
+def test_context_unknown_writing_422(seeded: Any) -> None:
+    c, _ = seeded
+    r = c.get("/api/v1/context", params={"date": DAY.isoformat(), "writing": "xx"})
+    assert r.status_code == 422
+
+
+def test_context_per_rule_prefs(seeded: Any) -> None:
+    c, eng = seeded
+    with eng.begin() as conn:
+        set_pref(conn, "context", {"w_exit": 0.05})
+        set_pref(conn, "context.oi", {"w_min": 0.1})
+    iv, oi = _get(c)["params"], _get(c, writing="oi")["params"]
+    assert (iv["w_min"], iv["w_exit"]) == (0.3, 0.05)
+    assert (oi["w_min"], oi["w_exit"]) == (0.1, 0.05)
 
 
 def test_context_without_rate(seeded: Any) -> None:
@@ -176,3 +210,4 @@ def test_load_day_has_no_lookahead(seeded: Any) -> None:
     assert max(inp.spot) == last and max(inp.vix) == last
     assert inp.options and all(o.close and max(o.close) == last for o in inp.options)
     assert all(o.oi and max(o.oi) == last for o in inp.options)  # tick 09:44:30 <= now
+    assert inp.prev_session_close_at == datetime(2026, 11, 25, 10, tzinfo=UTC)  # 15:30 IST

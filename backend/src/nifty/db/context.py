@@ -17,6 +17,7 @@ _VIX_SESSIONS = 252
 _RV_SESSIONS = 20
 _OWN_IV_SESSIONS, _OWN_IV_MIN = 5, 3
 _BAR = timedelta(minutes=1)
+_CLOSE = time(15, 30)  # IST session close: the previous-session IV baseline is taken there
 
 
 def _bounds(d: date) -> tuple[datetime, datetime]:
@@ -205,6 +206,10 @@ def _own_iv(
     return {("weekly", k): median(v) for k, v in per_side.items() if len(v) >= _OWN_IV_MIN}
 
 
+def _session_close_at(d: date) -> datetime:
+    return datetime.combine(d, _CLOSE, tzinfo=IST).astimezone(UTC)
+
+
 def _num(v: Any, default: float | None) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
 
@@ -256,7 +261,8 @@ def load_day(
     own = _own_iv(conn, underlying, spot_id, [d for d, _ in prior], now, r) if spot_id else {}
     return DayInputs(
         day=day, minutes=sorted(spot), spot=spot,
-        prev_spot_close=prior[0][1] if prior else None, vix=vix,
+        prev_spot_close=prior[0][1] if prior else None,
+        prev_session_close_at=_session_close_at(prev) if prev else None, vix=vix,
         vix_prior_closes=[c for _, c in reversed(vix_prior)], own_iv=own, rv=rv, r=r,
         max_stale_s=max_stale_s, expiries=sorted({e for _, _, e in rec.values()}),
         options=options, window_steps=window_steps,

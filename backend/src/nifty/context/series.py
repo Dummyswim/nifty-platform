@@ -4,6 +4,7 @@ from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 from typing import TypedDict
 
 from nifty.context import vol, writing
@@ -38,6 +39,7 @@ class DayInputs:
     minutes: list[datetime]  # session 1m bar starts (UTC), closed only
     spot: dict[datetime, float]
     prev_spot_close: float | None
+    prev_session_close_at: datetime | None  # 15:30 IST of the previous session (UTC)
     vix: dict[datetime, float]
     vix_prior_closes: list[float]
     own_iv: dict[tuple[str, bool], float]  # ("weekly", is_call) -> median ATM IV; missing = n/a
@@ -78,6 +80,7 @@ class State(TypedDict):
     day_move_pts: float | None
     na_reason: str | None
     flags: list[str]  # facts about this minute only (FLAG_*)
+    writing: str  # the writing rule behind w_day / w_roll / one_sided
 
 
 def choose_expiry(day: date, expiries: Sequence[date]) -> date | None:
@@ -86,6 +89,20 @@ def choose_expiry(day: date, expiries: Sequence[date]) -> date | None:
     if later and later[0] == day:
         later = later[1:]
     return later[0] if later else None
+
+
+@lru_cache(maxsize=1 << 16)
+def _implied_vol_cached(
+    price: float, s: float, k: float, t: float, r: float, is_call: bool
+) -> float | None:  # fmt: skip
+    return implied_vol(price, s, k, t, r, is_call)
+
+
+def _implied_vol(
+    price: float, s: float, k: float, t: float, r: float, is_call: bool
+) -> float | None:  # fmt: skip
+    """`implied_vol` memoised on rounded inputs: one bisection per (contract, minute)."""
+    return _implied_vol_cached(round(price, 4), round(s, 4), k, round(t, 12), r, is_call)
 
 
 def atm_side_iv(
@@ -98,8 +115,8 @@ def atm_side_iv(
     if lo is None or hi is None:
         return None
     t = years_to_expiry(expiry, at)
-    iv_lo = implied_vol(closes_by_strike[lo], spot, lo, t, r, is_call)
-    iv_hi = implied_vol(closes_by_strike[hi], spot, hi, t, r, is_call)
+    iv_lo = _implied_vol(closes_by_strike[lo], spot, lo, t, r, is_call)
+    iv_hi = _implied_vol(closes_by_strike[hi], spot, hi, t, r, is_call)
     if iv_lo is None or iv_hi is None:
         return None
     return vol.interp_iv(spot, (lo, iv_lo * 100.0), (hi, iv_hi * 100.0))
@@ -142,15 +159,38 @@ def _no_expiry_reason(day: date, expiries: Sequence[date]) -> str:
     return "no recorded option expiry for this day"
 
 
+def _leg_iv(
+    o: OptSeries, c_tr: _Track, spot_tr: _Track, at: datetime, inp: DayInputs
+) -> float | None:  # fmt: skip
+    """The leg's IV (vol points) as at minute `at`: carried close and spot at `at`."""
+    c, s = c_tr.at(at, inp.max_stale_s), spot_tr.at(at, inp.max_stale_s)
+    if c is None or s is None or inp.r is None:
+        return None
+    iv = _implied_vol(c, s, o.strike, years_to_expiry(o.expiry, at + _BAR), inp.r, o.is_call)
+    return None if iv is None else iv * 100.0
+
+
+def _prev_iv(o: OptSeries, inp: DayInputs) -> float | None:
+    """IV of the previous session's last close at that session's close."""
+    assert o.prev_close is not None and inp.prev_spot_close is not None
+    assert inp.prev_session_close_at is not None
+    if inp.r is None:
+        return None
+    t = years_to_expiry(o.expiry, inp.prev_session_close_at)
+    iv = _implied_vol(o.prev_close, inp.prev_spot_close, o.strike, t, inp.r, o.is_call)
+    return None if iv is None else iv * 100.0
+
+
 def _legs(
-    opts: list[tuple[OptSeries, _Track, _Track]], m: datetime, inp: DayInputs, roll_min: int,
+    opts: list[tuple[OptSeries, _Track, _Track]], m: datetime, inp: DayInputs, spot_tr: _Track,
+    p: ContextParams,
 ) -> tuple[list[Leg], list[Leg], dict[tuple[float, bool], float], bool]:  # fmt: skip
     """(day legs, rolling legs, closes by (strike, is_call), used a first-tick baseline)."""
     day_legs: list[Leg] = []
     roll_legs: list[Leg] = []
     closes: dict[tuple[float, bool], float] = {}
     first_tick = False
-    r_at = m - timedelta(minutes=roll_min)
+    r_at = m - timedelta(minutes=p.roll_min)
     for o, c_tr, oi_tr in opts:
         c, oi = c_tr.at(m, inp.max_stale_s), oi_tr.at(m, inp.max_stale_s)
         if c is None:
@@ -158,15 +198,19 @@ def _legs(
         closes[(o.strike, o.is_call)] = c  # IV/straddle need only a fresh close
         if oi is None:
             continue
-        prem_base = o.prev_close if o.prev_close is not None else c_tr.first(m)
+        first_c = c_tr.keys[0]  # a carried close implies a first one <= m
         oi_base = o.prev_oi if o.prev_oi is not None else oi_tr.first(m)
-        first_tick |= o.prev_close is None or o.prev_oi is None
-        assert prem_base is not None and oi_base is not None  # a carried value implies a first
-        day_legs.append(Leg(o.is_call, oi, c, oi_base, prem_base))
-        rc = c_tr.first(m) if c_tr.before_data(r_at) else c_tr.at(r_at, inp.max_stale_s)
+        assert oi_base is not None  # a carried value implies a first
+        has_prev = (o.prev_close, inp.prev_spot_close, inp.prev_session_close_at)
+        iv_prev = None not in has_prev
+        iv = _leg_iv(o, c_tr, spot_tr, m, inp)
+        iv_base = _prev_iv(o, inp) if iv_prev else _leg_iv(o, c_tr, spot_tr, first_c, inp)
+        first_tick |= o.prev_oi is None or (p.writing == "iv" and not iv_prev)
+        day_legs.append(Leg(o.is_call, oi, oi_base, iv, iv_base))
+        r_c = first_c if c_tr.before_data(r_at) else r_at
         roi = oi_tr.first(m) if oi_tr.before_data(r_at) else oi_tr.at(r_at, inp.max_stale_s)
-        if rc is not None and roi is not None:
-            roll_legs.append(Leg(o.is_call, oi, c, roi, rc))
+        if c_tr.at(r_c, inp.max_stale_s) is not None and roi is not None:
+            roll_legs.append(Leg(o.is_call, oi, roi, iv, _leg_iv(o, c_tr, spot_tr, r_c, inp)))
     return day_legs, roll_legs, closes, first_tick
 
 
@@ -217,6 +261,7 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
     spot_tr, vix_tr = _Track(inp.spot), _Track(inp.vix)
     not_before = time.fromisoformat(p.not_before)
     carry = _Carry()
+    score = writing.score_iv if p.writing == "iv" else writing.score_oi
     out: list[State] = []
     for m in inp.minutes:
         t = int(m.timestamp())
@@ -238,7 +283,7 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
         if expiry is not None and atm_k is not None and step is not None:
             span = n_steps * step + 1e-6
             in_play = [x for x in opts if abs(x[0].strike - atm_k) <= span]
-            day_legs, roll_legs, closes, first_tick = _legs(in_play, m, inp, p.roll_min)
+            day_legs, roll_legs, closes, first_tick = _legs(in_play, m, inp, spot_tr, p)
 
         ivs: dict[bool, float | None] = {True: None, False: None}
         if expiry is not None and spot_m is not None and inp.r is not None:
@@ -274,8 +319,8 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
             sides[is_call] = Side(iv=iv, verdict=v, own_iv=own,
                                   note=_side_note(iv, own, vix_m, inp.rv, p))  # fmt: skip
 
-        w_day = writing.score(day_legs) if day_legs else None
-        w_roll = writing.score(roll_legs) if day_legs else None
+        w_day = score(day_legs) if day_legs else None
+        w_roll = score(roll_legs) if day_legs else None
         oi_ce, oi_pe = writing.raw_oi(day_legs) if day_legs else (None, None)
         os_: int | None = None
         cand = "NONE"
@@ -316,5 +361,6 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
             na_reason=na,
             flags=[f for f, on in ((FLAG_EXPIRY_DAY, expiry_day), (FLAG_FIRST_TICK, first_tick))
                    if on],
+            writing=p.writing,
         ))  # fmt: skip
     return expiry, out, notes

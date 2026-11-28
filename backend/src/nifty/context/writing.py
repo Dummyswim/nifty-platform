@@ -1,4 +1,5 @@
-"""Option-writing classification: OI up with premium down is writing."""
+"""Option-writing scores. `iv` rule: OI up with that leg's IV not rising is writing.
+`oi` rule: raw OI change per side, no filter (the reel's method)."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -8,26 +9,35 @@ from dataclasses import dataclass
 class Leg:
     is_call: bool
     oi: float
-    prem: float
     oi_base: float
-    prem_base: float
+    iv: float | None  # vol points; None when the IV could not be computed
+    iv_base: float | None
 
 
-def writing_qty(leg: Leg) -> float:
+def writing_qty_iv(leg: Leg) -> float:
     d_oi = leg.oi - leg.oi_base
-    return d_oi if d_oi > 0 and leg.prem < leg.prem_base else 0.0
+    if d_oi > 0 and leg.iv is not None and leg.iv_base is not None and leg.iv <= leg.iv_base:
+        return d_oi
+    return 0.0
 
 
-def score(legs: Sequence[Leg]) -> float:
+def score_iv(legs: Sequence[Leg]) -> float:
     """(PW - CW) / (PW + CW): +1 all put writing, -1 all call writing, 0.0 when none."""
-    cw = sum(writing_qty(x) for x in legs if x.is_call)
-    pw = sum(writing_qty(x) for x in legs if not x.is_call)
+    cw = sum(writing_qty_iv(x) for x in legs if x.is_call)
+    pw = sum(writing_qty_iv(x) for x in legs if not x.is_call)
     total = cw + pw
     return (pw - cw) / total if total else 0.0
 
 
+def score_oi(legs: Sequence[Leg]) -> float:
+    """(dOI_PE - dOI_CE) / (|dOI_PE| + |dOI_CE|), 0.0 when both are 0."""
+    calls, puts = raw_oi(legs)
+    total = abs(puts) + abs(calls)
+    return (puts - calls) / total if total else 0.0
+
+
 def raw_oi(legs: Sequence[Leg]) -> tuple[float, float]:
-    """(sum dOI calls, sum dOI puts) with no price filter."""
+    """(sum dOI calls, sum dOI puts) with no filter."""
     calls = sum(x.oi - x.oi_base for x in legs if x.is_call)
     puts = sum(x.oi - x.oi_base for x in legs if not x.is_call)
     return calls, puts

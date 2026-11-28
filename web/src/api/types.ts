@@ -891,6 +891,8 @@ export interface components {
         ContextOut: {
             /** Underlying */
             underlying: string;
+            /** Writing */
+            writing: string;
             /** Date */
             date?: string | null;
             /** Expiry */
@@ -1560,6 +1562,8 @@ export interface components {
             na_reason?: string | null;
             /** Flags */
             flags: string[];
+            /** Writing */
+            writing: string;
         };
         /** SubmitOut */
         SubmitOut: {
@@ -2769,6 +2773,7 @@ export interface operations {
             query?: {
                 underlying?: string;
                 date?: string | null;
+                writing?: "iv" | "oi";
             };
             header?: never;
             path?: never;

@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
+
+Writing = Literal["iv", "oi"]  # OI up with IV not rising / raw OI change
 
 
 class ContextParams(BaseModel):
@@ -19,6 +21,7 @@ class ContextParams(BaseModel):
     confirm: int = 3
     release: int = 2
     not_before: str = "09:30"
+    writing: Writing = "iv"
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

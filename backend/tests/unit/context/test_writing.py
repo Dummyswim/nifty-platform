@@ -1,36 +1,52 @@
-from nifty.context.writing import Leg, one_sided, raw_oi, score, writing_qty
+from nifty.context.writing import Leg, one_sided, raw_oi, score_iv, score_oi, writing_qty_iv
 
 
 def leg(
-    is_call: bool, oi: float, prem: float, oi_base: float = 0.0, prem_base: float = 10.0
-) -> Leg:
-    return Leg(is_call=is_call, oi=oi, prem=prem, oi_base=oi_base, prem_base=prem_base)
+    is_call: bool, oi: float, oi_base: float = 0.0, iv: float | None = 13.5,
+    iv_base: float | None = 14.0,
+) -> Leg:  # fmt: skip
+    return Leg(is_call=is_call, oi=oi, oi_base=oi_base, iv=iv, iv_base=iv_base)
 
 
-def test_writing_qty_oi_up_premium_down() -> None:
-    assert writing_qty(leg(True, 100, 5)) == 100
+def test_writing_qty_iv_oi_up_iv_down() -> None:
+    assert writing_qty_iv(leg(True, 100)) == 100
 
 
-def test_writing_qty_buying_is_not_writing() -> None:
-    assert writing_qty(leg(True, 100, 15)) == 0.0
+def test_writing_qty_iv_flat_iv_counts() -> None:
+    assert writing_qty_iv(leg(True, 100, iv=14.0)) == 100
 
 
-def test_writing_qty_oi_down_is_zero() -> None:
-    assert writing_qty(leg(True, 50, 5, oi_base=100)) == 0.0
+def test_writing_qty_iv_rising_iv_is_not_writing() -> None:
+    assert writing_qty_iv(leg(True, 100, iv=14.5)) == 0.0
 
 
-def test_score_call_heavy_is_negative() -> None:
-    legs = [leg(True, 300, 5), leg(False, 100, 5)]
-    assert score(legs) == -0.5
+def test_writing_qty_iv_missing_iv_is_zero() -> None:
+    assert writing_qty_iv(leg(True, 100, iv=None)) == 0.0
+    assert writing_qty_iv(leg(True, 100, iv_base=None)) == 0.0
 
 
-def test_score_nothing_is_zero() -> None:
-    assert score([]) == 0.0
-    assert score([leg(True, 100, 15)]) == 0.0
+def test_writing_qty_iv_oi_down_is_zero() -> None:
+    assert writing_qty_iv(leg(True, 50, oi_base=100)) == 0.0
 
 
-def test_raw_oi_has_no_price_filter() -> None:
-    legs = [leg(True, 100, 15), leg(False, 40, 5), leg(False, 30, 5, oi_base=50)]
+def test_score_iv_call_heavy_is_negative() -> None:
+    assert score_iv([leg(True, 300), leg(False, 100)]) == -0.5
+
+
+def test_score_iv_nothing_is_zero() -> None:
+    assert score_iv([]) == 0.0
+    assert score_iv([leg(True, 100, iv=15.0)]) == 0.0
+
+
+def test_score_oi_has_no_iv_filter() -> None:
+    assert score_oi([leg(True, 300, iv=20.0), leg(False, 100, iv=None)]) == -0.5
+    assert score_oi([leg(True, 300), leg(False, 0, oi_base=100)]) == -1.0  # (-100-300)/(100+300)
+    assert score_oi([leg(True, 100, oi_base=100), leg(False, 0)]) == 0.0
+    assert score_oi([]) == 0.0
+
+
+def test_raw_oi_has_no_filter() -> None:
+    legs = [leg(True, 100, iv=15.0), leg(False, 40), leg(False, 30, oi_base=50)]
     assert raw_oi(legs) == (100, 20)
 
 
