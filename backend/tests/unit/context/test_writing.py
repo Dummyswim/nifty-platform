@@ -57,7 +57,9 @@ def test_raw_oi_has_no_filter() -> None:
 
 def test_one_sided() -> None:
     assert one_sided(-0.46, -0.52, 0.3) == -1
-    assert one_sided(-0.46, 0.2, 0.3) == 0
+    assert one_sided(-0.46, 0.2, 0.3) == -1  # weak opposition allowed
+    assert one_sided(-0.46, 0.6, 0.3) == 0
+    assert one_sided(-0.46, 0.5, 0.3) == -1  # only > roll_oppose blocks
     assert one_sided(-0.46, 0.0, 0.3) == -1
     assert one_sided(0.29, 0.5, 0.3) == 0
     assert one_sided(0.46, 0.5, 0.3) == 1

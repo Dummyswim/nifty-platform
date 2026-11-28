@@ -308,7 +308,10 @@ def test_shown_bias_holds_above_w_exit() -> None:
     def pe(i: int, strike: float) -> float:
         return 2400.0 if i >= k else 1000.0
 
-    _, s, _ = build_series(make_day(ce_oi=ce, pe_oi=pe, pe_iv=falling_iv), P)
+    _, s, _ = build_series(
+        make_day(ce_oi=ce, pe_oi=pe, pe_iv=falling_iv),
+        ContextParams(w_min=0.3, w_exit=0.15, roll_oppose=0.03),
+    )
     assert s[k]["w_day"] == pytest.approx((1400 - 2500) / 3900)  # below w_min, above w_exit
     assert s[k]["one_sided"] == 0 and s[k]["candidate"] == "BEARISH"
     assert s[k + 1]["bias"] == "BEARISH"

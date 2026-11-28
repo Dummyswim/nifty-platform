@@ -2,12 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ContextOut, ContextSide } from "../api/schemas";
 import { boxView } from "./pick";
+import type { ContextWriting } from "./useMarketContext";
+
+export const WRITING_TITLE: Record<ContextWriting, string> = { iv: "Writing: OI + IV", oi: "Writing: raw OI (reel)" };
+const TOGGLE: Record<ContextWriting, { pref: string; label: string }> = {
+  iv: { pref: "context.show_iv", label: "OI+IV" },
+  oi: { pref: "context.show_oi", label: "raw OI" },
+};
 
 const hhmm = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(11, 16); // IST
 const signed = (v: number, d: number) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
 const side = (name: string, s: ContextSide) => `${name} IV ${s.iv!.toFixed(1)}${s.verdict ? ` ${s.verdict}` : ""}`;
 
-export function ContextBox({ data, error, cursor }: { data?: ContextOut; error?: unknown; cursor: number | null }) {
+export function ContextBox({ writing, data, error, cursor }: { writing: ContextWriting; data?: ContextOut; error?: unknown; cursor: number | null }) {
   const { state: s, note, flags } = boxView(data, cursor, error);
   const na = !s || !!s.na_reason;
   const rows: string[] = [];
@@ -28,25 +35,26 @@ export function ContextBox({ data, error, cursor }: { data?: ContextOut; error?:
       rows.push(`Move ${signed(Math.round(s.day_move_pts), 0)} / ±${Math.round(s.exp_move_pts)} · ${Math.round((Math.abs(s.day_move_pts) / s.exp_move_pts) * 100)} %`);
   }
   return (
-    <div className="context-box" data-testid="context-box" data-bias={s?.bias ?? "NONE"} data-na={na ? "1" : undefined}>
-      <div className="ctx-head">Market context{s && ` ${hhmm(s.t)}`}</div>
+    <div className="context-box" data-testid={`context-box-${writing}`} data-bias={s?.bias ?? "NONE"} data-na={na ? "1" : undefined}>
+      <div className="ctx-head">{WRITING_TITLE[writing]}{s && ` ${hhmm(s.t)}`}</div>
       {note ? <div className="ctx-na">{note}</div> : rows.map((r) => <div key={r}>{r}</div>)}
       {flags.length > 0 && <div className="ctx-flags">{flags.join(" · ")}</div>}
     </div>
   );
 }
 
-/** Sidebar switch for pref `context.show` (default on). */
-export function ContextToggle() {
+/** Sidebar switch for pref `context.show_iv` / `context.show_oi` (default on). */
+export function ContextToggle({ writing }: { writing: ContextWriting }) {
+  const { pref, label } = TOGGLE[writing];
   const qc = useQueryClient();
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
   const save = useMutation({
-    mutationFn: (value: boolean) => api("/prefs/context.show", { method: "PUT", body: { value } }),
+    mutationFn: (value: boolean) => api(`/prefs/${pref}`, { method: "PUT", body: { value } }),
     // cancel an in-flight prefs refetch so it cannot overwrite the optimistic value
     onMutate: async (value) => {
       await qc.cancelQueries({ queryKey: ["prefs"] });
       const prev = qc.getQueryData<Record<string, unknown>>(["prefs"]);
-      qc.setQueryData(["prefs"], (old: Record<string, unknown> | undefined) => ({ ...(old ?? {}), "context.show": value }));
+      qc.setQueryData(["prefs"], (old: Record<string, unknown> | undefined) => ({ ...(old ?? {}), [pref]: value }));
       return { prev };
     },
     onError: (_e, _v, ctx) => qc.setQueryData(["prefs"], ctx?.prev),
@@ -54,8 +62,8 @@ export function ContextToggle() {
   });
   return (
     <label className="ctx-toggle">
-      <input type="checkbox" role="switch" checked={prefs.data?.["context.show"] !== false} onChange={(e) => save.mutate(e.target.checked)} aria-label="Toggle market context" />
-      <span>Market context</span>
+      <input type="checkbox" role="switch" checked={prefs.data?.[pref] !== false} onChange={(e) => save.mutate(e.target.checked)} aria-label={`Toggle market context ${label}`} />
+      <span>Market context: {label}</span>
     </label>
   );
 }

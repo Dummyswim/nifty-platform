@@ -99,7 +99,9 @@ def test_params_forbid_extra() -> None:
         {"band_pct": -1},
         {"exit_pct": 9},  # below band_pct 10
         {"vix_exit_pct": 71},  # above vix_pct 70
-        {"w_exit": 0.31},  # above w_min 0.3
+        {"w_exit": 0.51},  # above w_min 0.5
+        {"roll_oppose": 0},
+        {"roll_oppose": 1.1},
         {"confirm": 0},
         {"release": 0},
         {"roll_min": 0},
@@ -115,5 +117,12 @@ def test_params_reject_inconsistent(bad: dict[str, object]) -> None:
 
 
 def test_params_accept_boundaries() -> None:
-    ContextParams.model_validate({"exit_pct": 10, "vix_exit_pct": 70, "w_exit": 0.3,
+    ContextParams.model_validate({"exit_pct": 10, "vix_exit_pct": 70, "w_exit": 0.5, "roll_oppose": 1,
                                   "confirm": 1, "release": 1, "roll_min": 1, "strikes": 1})  # fmt: skip
+
+
+def test_params_per_rule_threshold_defaults() -> None:
+    iv, oi = ContextParams(writing="iv"), ContextParams(writing="oi")
+    assert (iv.w_min, iv.w_exit) == (0.5, 0.3) and (oi.w_min, oi.w_exit) == (0.25, 0.15)
+    assert ContextParams(writing="oi", w_min=0.2).w_exit == 0.15
+    assert ContextParams().roll_oppose == 0.5

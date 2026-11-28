@@ -42,9 +42,12 @@ export function ChartPane(p: ChartPaneProps) {
   const inst = instruments.data?.find((i) => i.tradingsymbol === symbol || i.instrument_id === symbol);
   const iid = inst?.instrument_id;
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: () => api<Record<string, unknown>>("/prefs") });
-  const showContext = p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50" && prefs.data?.["context.show"] !== false;
+  const niftyIndex = p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50";
+  const showIv = niftyIndex && prefs.data?.["context.show_iv"] !== false;
+  const showOi = niftyIndex && prefs.data?.["context.show_oi"] !== false;
   const istDate = cursor === null ? undefined : new Date((cursor + 19800) * 1000).toISOString().slice(0, 10);
-  const mctx = useMarketContext("NIFTY", p.live, istDate);
+  const mctxIv = useMarketContext("NIFTY", p.live, istDate, "iv");
+  const mctxOi = useMarketContext("NIFTY", p.live, istDate, "oi");
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
   // option contracts: the collector runs no engines for them, so Live re-runs the History path per finalized bar
   const [finalized, setFinalized] = useState(0);
@@ -104,7 +107,12 @@ export function ChartPane(p: ChartPaneProps) {
         syncIndex={p.index}
         keysEnabled={p.active}
       />
-      {showContext && <ContextBox data={mctx.data} error={mctx.error} cursor={cursor} />}
+      {(showIv || showOi) && (
+        <div className="context-stack">
+          {showIv && <ContextBox writing="iv" data={mctxIv.data} error={mctxIv.error} cursor={cursor} />}
+          {showOi && <ContextBox writing="oi" data={mctxOi.data} error={mctxOi.error} cursor={cursor} />}
+        </div>
+      )}
       {note && <div className="pane-note" data-testid="pane-note">{p.pane.label ?? symbol}: {note}. Option charts show only what the live collector recorded.</div>}
       {p.active && p.live && p.bannerSlot && createPortal(
         <div className={`banner ${bn.level}`} role="status" data-testid="live-banner" data-state={sub.state ?? ""}>
@@ -115,7 +123,7 @@ export function ChartPane(p: ChartPaneProps) {
       )}
       {p.active && p.sidebarSlot && createPortal(
         <div className="side">
-          {p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50" && <ContextToggle />}
+          {niftyIndex && <><ContextToggle writing="iv" /><ContextToggle writing="oi" /></>}
           <IndicatorPanel engines={ind.engines} state={ind.state} status={ind.status} update={ind.update} />
         </div>,
         p.sidebarSlot,

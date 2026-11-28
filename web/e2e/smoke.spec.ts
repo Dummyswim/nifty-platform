@@ -142,16 +142,29 @@ test("login, chart loads bars, TF switch, a horizontal line survives reload", as
   await page.getByTestId("rs-open-chart").click();
   await expect(chart).toBeVisible();
 
-  // market context box: the oracle has no option data, so it shows an n/a line; the sidebar switch hides it
-  const ctx = page.getByTestId("context-box");
-  await expect(ctx).toBeVisible();
-  await expect(ctx).toHaveAttribute("data-na", "1");
-  await expect(ctx).toContainText(/n\/a|no /);
-  const ctxToggle = page.getByLabel("Toggle market context");
-  await ctxToggle.click();
-  await expect(ctx).toHaveCount(0);
-  await ctxToggle.click();
-  await expect(ctx).toBeVisible();
+  // market context boxes (one per writing rule): the oracle has no option data, so each shows an n/a line;
+  // each sidebar switch hides only its own box
+  const ctxIv = page.getByTestId("context-box-iv");
+  const ctxOi = page.getByTestId("context-box-oi");
+  for (const box of [ctxIv, ctxOi]) {
+    await expect(box).toBeVisible();
+    await expect(box).toHaveAttribute("data-na", "1");
+    await expect(box).toContainText(/n\/a|no /);
+  }
+  await expect(ctxIv).toContainText("Writing: OI + IV");
+  await expect(ctxOi).toContainText("Writing: raw OI (reel)");
+  const ivToggle = page.getByLabel("Toggle market context OI+IV");
+  const oiToggle = page.getByLabel("Toggle market context raw OI");
+  await ivToggle.click();
+  await expect(ctxIv).toHaveCount(0);
+  await expect(ctxOi).toBeVisible();
+  await ivToggle.click();
+  await expect(ctxIv).toBeVisible();
+  await oiToggle.click();
+  await expect(ctxOi).toHaveCount(0);
+  await expect(ctxIv).toBeVisible();
+  await oiToggle.click();
+  await expect(ctxOi).toBeVisible();
 
   // analytics page renders its charts
   await page.getByRole("button", { name: "Analytics", exact: true }).click();

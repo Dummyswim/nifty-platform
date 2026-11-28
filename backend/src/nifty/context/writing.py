@@ -45,11 +45,11 @@ def raw_oi(legs: Sequence[Leg]) -> tuple[float, float]:
     return calls, puts
 
 
-def one_sided(w_day: float, w_roll: float, w_min: float) -> int:
-    """-1/0/+1 when |w_day| >= w_min and the rolling score is zero or agrees in sign."""
+def one_sided(w_day: float, w_roll: float, w_min: float, roll_oppose: float = 0.5) -> int:
+    """-1/0/+1 when |w_day| >= w_min and the rolling score does not oppose strongly
+    (opposite sign with |w_roll| > roll_oppose)."""
     if abs(w_day) < w_min:
         return 0
-    sign = 1 if w_day > 0 else -1
-    if w_roll == 0 or (w_roll > 0) == (w_day > 0):
-        return sign
-    return 0
+    if w_roll * w_day < 0 and abs(w_roll) > roll_oppose:
+        return 0
+    return 1 if w_day > 0 else -1

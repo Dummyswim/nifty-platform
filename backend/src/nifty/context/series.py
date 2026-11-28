@@ -327,9 +327,9 @@ def build_series(inp: DayInputs, p: ContextParams) -> tuple[date | None, list[St
         os_: int | None = None
         cand = "NONE"
         if w_day is not None and w_roll is not None:
-            os_ = writing.one_sided(w_day, w_roll, p.w_min)
+            os_ = writing.one_sided(w_day, w_roll, p.w_min, p.roll_oppose)
             # a shown bias holds while writing stays beyond the lower exit threshold
-            held = writing.one_sided(w_day, w_roll, p.w_exit)
+            held = writing.one_sided(w_day, w_roll, p.w_exit, p.roll_oppose)
             shown = {"BEARISH": -1, "BULLISH": 1}.get(carry.bias)
             direction = held if held == shown else os_
             if na is None and vix_high:

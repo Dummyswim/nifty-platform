@@ -159,14 +159,21 @@ def test_context_unknown_writing_422(seeded: Any) -> None:
     assert r.status_code == 422
 
 
+def test_context_per_rule_default_thresholds(seeded: Any) -> None:
+    c, _ = seeded
+    iv, oi = _get(c)["params"], _get(c, writing="oi")["params"]
+    assert (iv["w_min"], iv["w_exit"]) == (0.5, 0.3)
+    assert (oi["w_min"], oi["w_exit"]) == (0.25, 0.15)
+    assert iv["roll_oppose"] == 0.5
+
+
 def test_context_per_rule_prefs(seeded: Any) -> None:
     c, eng = seeded
     with eng.begin() as conn:
-        set_pref(conn, "context", {"w_exit": 0.05})
-        set_pref(conn, "context.oi", {"w_min": 0.1})
+        set_pref(conn, "context.oi", {"w_min": 0.2})
     iv, oi = _get(c)["params"], _get(c, writing="oi")["params"]
-    assert (iv["w_min"], iv["w_exit"]) == (0.3, 0.05)
-    assert (oi["w_min"], oi["w_exit"]) == (0.1, 0.05)
+    assert (iv["w_min"], iv["w_exit"]) == (0.5, 0.3)
+    assert (oi["w_min"], oi["w_exit"]) == (0.2, 0.15)
 
 
 def test_context_without_rate(seeded: Any) -> None:

@@ -1,9 +1,13 @@
 from datetime import datetime
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 Writing = Literal["iv", "oi"]  # OI up with IV not rising / raw OI change
+
+
+# Per-rule (w_min, w_exit) defaults (user-confirmed 2026-11-27) when the caller omits them.
+RULE_THRESHOLDS: dict[str, tuple[float, float]] = {"iv": (0.5, 0.3), "oi": (0.25, 0.15)}
 
 
 class ContextParams(BaseModel):
@@ -15,13 +19,22 @@ class ContextParams(BaseModel):
     vix_pct: float = 70
     vix_exit_pct: float = 65
     strikes: int = 3
-    w_min: float = 0.3
-    w_exit: float = 0.15
+    w_min: float = 0.5
+    w_exit: float = 0.3
+    roll_oppose: float = 0.5
     roll_min: int = 15
     confirm: int = 3
     release: int = 2
     not_before: str = "09:30"
     writing: Writing = "iv"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rule_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("writing", "iv") in RULE_THRESHOLDS:
+            w_min, w_exit = RULE_THRESHOLDS[data.get("writing", "iv")]
+            return {"w_min": w_min, "w_exit": w_exit, **data}
+        return data
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -33,6 +46,8 @@ class ContextParams(BaseModel):
             raise ValueError("vix_exit_pct must be <= vix_pct")
         if self.w_exit > self.w_min:
             raise ValueError("w_exit must be <= w_min")
+        if not 0 < self.roll_oppose <= 1:
+            raise ValueError("roll_oppose must be in (0, 1]")
         for name in ("confirm", "release", "roll_min", "strikes"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be >= 1")
