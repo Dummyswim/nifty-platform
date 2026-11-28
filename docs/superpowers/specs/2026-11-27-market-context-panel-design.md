@@ -164,3 +164,27 @@ History/Replay: shows the series entry at the replay cursor (≤ cursor, no look
   e2e: panel visible with a bias on a seeded day. `make check`, `make e2e` green; NIFTY e2e unchanged.
 - Manual on 8081 by the user: a live session (collector on dev during market hours only if the user
   chooses) and two or three recorded past days in Replay.
+
+## Addendum (2026-11-27, after testing on copied main-DB data): two writing rules, two boxes
+**Why:** on the recorded days (Nov 26 up, Nov 27 down) the original rule "OI↑ ∧ premium↓ vs the baseline"
+pinned the writing score at +1.0 / −1.0 all day: on a down day every call loses premium and every put gains,
+so put writing can never count. The score restated the day's direction. Dropped.
+
+**Rules (user decision: both, side by side):**
+- **`iv` — OI + IV:** a leg counts as writing when ΔOI > 0 and its IV did not rise vs the same baseline
+  (day: IV at the previous session's last close, else first IV today; rolling: IV at m − `roll_min`).
+  IV per leg from our Black–Scholes with that minute's spot; memoised per (contract, minute, price, spot).
+  Score = (PW − CW)/(PW + CW) as before.
+- **`oi` — raw OI (the reel's method):** ΔOI summed per side with no filter;
+  score = (ΔOI_PE − ΔOI_CE) / (|ΔOI_PE| + |ΔOI_CE|), 0 when both are 0. Rolling the same over `roll_min`.
+- Everything else (VIX, premium verdicts, confirmation/release, 09:30 gate, n/a rules) is shared.
+
+**API:** `GET /context?…&writing=iv|oi` (default `iv`); response carries `writing`; cache key includes it.
+Params: prefs `context` shared, plus optional per-rule overrides `context.iv` / `context.oi` (merged on top).
+Default `w_min` / `w_exit` per rule are set from a calibration over the recorded days, confirmed by the user.
+
+**Web:** two boxes stacked top-right on NIFTY index panes, titled `Writing: OI + IV` and `Writing: raw OI (reel)`,
+each with its own sidebar switch (prefs `context.show_iv`, `context.show_oi`, default on; old `context.show`
+is no longer read).
+
+**Data note:** main collector recorded no option ticks 2026-11-26 09:36–11:12 IST; the panel shows n/a there.
