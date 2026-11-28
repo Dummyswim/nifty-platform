@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { DrawingData, DrawingKind, DrawingOut, InstrumentOut } from "../api/schemas";
 import { ContextBox, ContextToggle } from "../context/ContextBox";
+import { contextDate } from "../context/pick";
 import { useMarketContext } from "../context/useMarketContext";
 import { EnginePanel } from "../indicators/EnginePanel";
 import { IndicatorPanel } from "../indicators/IndicatorPanel";
@@ -45,7 +46,8 @@ export function ChartPane(p: ChartPaneProps) {
   const niftyIndex = p.pane.kind === "index" && inst?.tradingsymbol === "NIFTY 50";
   const showIv = niftyIndex && prefs.data?.["context.show_iv"] !== false;
   const showOi = niftyIndex && prefs.data?.["context.show_oi"] !== false;
-  const istDate = cursor === null ? undefined : new Date((cursor + 19800) * 1000).toISOString().slice(0, 10);
+  const [lastBarT, setLastBarT] = useState<number | null>(null);
+  const istDate = contextDate(p.live, cursor, lastBarT);
   const mctxIv = useMarketContext("NIFTY", p.live, istDate, "iv", showIv);
   const mctxOi = useMarketContext("NIFTY", p.live, istDate, "oi", showOi);
   const [ver, setVer] = useState(0); // bumped by the stream when engine outputs changed
@@ -64,7 +66,7 @@ export function ChartPane(p: ChartPaneProps) {
   // the replay bar steps the active pane's bars: hand them over whenever this pane becomes active
   const onTimes = p.onTimes;
   const lastTimes = useRef<number[]>([]);
-  const reportTimes = (t: number[]) => { lastTimes.current = t; setNBars(t.length); onTimes?.(t); };
+  const reportTimes = (t: number[]) => { lastTimes.current = t; setNBars(t.length); setLastBarT(t.length ? t[t.length - 1] : null); onTimes?.(t); };
   useEffect(() => { if (p.active) onTimes?.(lastTimes.current); }, [p.active, onTimes]);
   const note = nBars < 0 ? null : paneNote(p.pane.kind, nBars);
   const bn = banner(sub.state, sub.socket);

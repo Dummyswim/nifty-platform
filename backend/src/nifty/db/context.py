@@ -26,17 +26,28 @@ def _bounds(d: date) -> tuple[datetime, datetime]:
     return lo, lo + timedelta(days=1)
 
 
-def _index_id(conn: Connection, symbol: str) -> str | None:
-    """The index with 1m bars, Kite first (same preference as `db.options.spot`)."""
-    return conn.execute(
-        text(
-            "SELECT i.instrument_id FROM instruments i WHERE i.tradingsymbol = :s "
-            "AND i.instrument_type = 'INDEX' AND EXISTS (SELECT 1 FROM bars b "
-            "WHERE b.instrument_id = i.instrument_id AND b.timeframe = '1m') "
-            "ORDER BY (i.provider = 'kite') DESC, i.instrument_id LIMIT 1"
-        ),
-        {"s": symbol},
-    ).scalar()
+_INDEX_IDS = (
+    "SELECT instrument_id FROM instruments WHERE tradingsymbol = :s AND instrument_type = 'INDEX'"
+)
+
+
+def _index_id(conn: Connection, symbol: str, day: date | None = None) -> str | None:
+    """The index with 1m bars, Kite first (same preference as `db.options.spot`); with `day`,
+    one with bars on that day if any (a provider may hold only a few recent bars)."""
+    sql = (
+        "SELECT i.instrument_id FROM instruments i WHERE i.instrument_id IN ({ids}) "
+        "AND EXISTS (SELECT 1 FROM bars b WHERE b.instrument_id = i.instrument_id "
+        "AND b.timeframe = '1m'{on_day}) ORDER BY (i.provider = 'kite') DESC, i.instrument_id LIMIT 1"
+    )
+    if day is not None:
+        lo, hi = _bounds(day)
+        on_day = " AND b.bar_start_utc >= :lo AND b.bar_start_utc < :hi"
+        got = conn.execute(text(sql.format(ids=_INDEX_IDS, on_day=on_day)),
+                           {"s": symbol, "lo": lo, "hi": hi}).scalar()  # fmt: skip
+        if got is not None:
+            return str(got)
+    got = conn.execute(text(sql.format(ids=_INDEX_IDS, on_day="")), {"s": symbol}).scalar()
+    return None if got is None else str(got)
 
 
 def _closes(
@@ -224,8 +235,8 @@ def load_day(
     max_stale_s = _num(prefs.get("options.max_stale_s"), 60.0)
     window_steps = int(_num(prefs.get("options.window_steps"), 5) or 5)
     assert max_stale_s is not None
-    spot_id = _index_id(conn, "NIFTY 50")
-    vix_id = _index_id(conn, "INDIA VIX")
+    spot_id = _index_id(conn, "NIFTY 50", day)
+    vix_id = _index_id(conn, "INDIA VIX", day)
     lo, hi = _bounds(day)
     spot = _closes(conn, spot_id, lo, hi, now) if spot_id else {}
     prior = _session_closes(conn, spot_id, day, _RV_SESSIONS) if spot_id else []
@@ -271,7 +282,7 @@ def load_day(
 
 def last_closed_minute(conn: Connection, day: date, now: datetime) -> datetime | None:
     """Newest NIFTY 50 1m bar start on `day` whose bar has ended by now (the cache key)."""
-    spot_id = _index_id(conn, "NIFTY 50")
+    spot_id = _index_id(conn, "NIFTY 50", day)
     if spot_id is None:
         return None
     lo, hi = _bounds(day)
@@ -284,19 +295,28 @@ def last_closed_minute(conn: Connection, day: date, now: datetime) -> datetime |
     ).scalar()
 
 
+_LOOKBACK_DAYS = 10  # non-session days with bars skipped before giving up
+
+
 def session_for(conn: Connection, cal: Calendar, day: date | None, now: datetime) -> date | None:
-    """`day` when it is a session day with NIFTY bars; by default today if so, else the last
-    session with NIFTY bars."""
+    """`day` when it is a session day with NIFTY bars; by default the newest session day with
+    NIFTY 50 bars ended by now, from any provider (today when it has some)."""
     if day is not None:
         ok = cal.is_session_day(day) and last_closed_minute(conn, day, now) is not None
         return day if ok else None
-    today = Calendar.session_date(now)
-    if cal.is_session_day(today) and last_closed_minute(conn, today, now) is not None:
-        return today
-    spot_id = _index_id(conn, "NIFTY 50")
-    if spot_id is None:
-        return None
-    for d, _ in _session_closes(conn, spot_id, today, 10):
+    hi = now
+    for _ in range(_LOOKBACK_DAYS):
+        t = conn.execute(
+            text(
+                f"SELECT max(bar_start_utc) FROM bars WHERE instrument_id IN ({_INDEX_IDS}) "
+                "AND timeframe = '1m' AND bar_end_utc <= :now AND bar_start_utc < :hi"
+            ),
+            {"s": "NIFTY 50", "now": now, "hi": hi},
+        ).scalar()
+        if t is None:
+            return None
+        d = Calendar.session_date(t)
         if cal.is_session_day(d):
             return d
+        hi = _bounds(d)[0]
     return None

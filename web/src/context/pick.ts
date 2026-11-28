@@ -30,3 +30,13 @@ export function boxView(
   const note = s.na_reason ? (s.na_reason.includes("n/a") ? s.na_reason : `n/a: ${s.na_reason}`) : null;
   return { state: s, note, flags: s.flags };
 }
+
+const istDate = (t: number) => new Date((t + 19800) * 1000).toISOString().slice(0, 10);
+
+/** The session date to ask for: Live none (the server picks today); History the cursor's IST date,
+ * else that of the pane's last bar, else none (the server picks the last session). */
+export function contextDate(live: boolean, cursor: number | null, lastBarT: number | null): string | undefined {
+  if (live) return undefined;
+  if (cursor !== null) return istDate(cursor);
+  return lastBarT !== null ? istDate(lastBarT) : undefined;
+}

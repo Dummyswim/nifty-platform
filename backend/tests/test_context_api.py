@@ -233,3 +233,40 @@ def test_load_day_has_no_lookahead(seeded: Any) -> None:
     assert inp.options and all(o.close and max(o.close) == last for o in inp.options)
     assert all(o.oi and max(o.oi) == last for o in inp.options)  # tick 09:44:30 <= now
     assert inp.prev_session_close_at == datetime(2026, 11, 25, 10, tzinfo=UTC)  # 15:30 IST
+
+
+CSV_ID = "csv:NIFTY 50"
+
+
+@pytest.fixture
+def csv_only(api: tuple[TestClient, Engine]) -> Iterator[TestClient]:
+    """NIFTY 50 history from CSV only (Fri 2026-11-20), plus a few Kite index bars on Saturday
+    2026-11-21 (as the synthetic options fixture writes at "now")."""
+    c, eng = api
+    with eng.begin() as conn:
+        upsert_instrument(conn, Instrument(instrument_id=CSV_ID, provider="csv",
+                                           tradingsymbol="NIFTY 50"))  # fmt: skip
+        upsert_instrument(conn, Instrument(instrument_id=SPOT_ID, provider="kite",
+                                           tradingsymbol="NIFTY 50"))  # fmt: skip
+        bars = [
+            _bar(CSV_ID, m, 26_000.0 + i) for i, m in enumerate(_minutes(date(2026, 11, 20), 30))
+        ]
+        bars += [_bar(SPOT_ID, m, 26_100.0) for m in _minutes(date(2026, 11, 21), 5)]
+        upsert_bars(conn, bars)
+    context_routes.clear_cache()
+    yield c
+    context_routes.clear_cache()
+
+
+def test_context_default_is_last_session_with_nifty_bars(csv_only: TestClient) -> None:
+    r = csv_only.get("/api/v1/context")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["date"] == "2026-11-20" and len(body["series"]) == 30
+    assert all(x["na_reason"] != "no spot data" for x in body["series"])
+    assert body["series"][-1]["day_move_pts"] is None  # no previous session recorded
+
+
+def test_context_csv_only_explicit_non_session_day(csv_only: TestClient) -> None:
+    body = _get(csv_only, date="2026-11-21")
+    assert body["series"] == [] and body["notes"] == ["no session data for 2026-11-21"]

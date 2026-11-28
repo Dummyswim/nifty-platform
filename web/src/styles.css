@@ -22,7 +22,7 @@ nav { display: flex; gap: 6px; flex: 1; }
 .chart.drawing { cursor: crosshair; }
 .legend { position: absolute; top: 8px; left: 12px; z-index: 3; pointer-events: none; font-size: 13px; text-shadow: 0 0 4px #000; }
 .legend b { font-weight: 600; }
-.chart-error { position: absolute; top: 40px; left: 12px; z-index: 3; color: #ff8a8a; }
+.chart-error { position: absolute; top: 40px; left: 12px; z-index: 5; color: #ff8a8a; background: #121724ee; padding: 2px 8px; border-radius: 6px; } /* above the context box */
 .panel { padding: 16px 24px; max-width: 760px; } .panel pre { background: var(--panel); padding: 12px; border-radius: 8px; overflow: auto; }
 .login { display: grid; place-items: center; height: 100%; background: radial-gradient(1200px 600px at 50% -10%, #17223d 0%, var(--bg) 60%); }
 .card { width: min(360px, 92vw); display: flex; flex-direction: column; gap: 12px; padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 20px 60px #0008; }

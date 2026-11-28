@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
 import type { ContextOut, ContextState } from "../api/schemas";
-import { boxView, pickState } from "./pick";
+import { boxView, contextDate, pickState } from "./pick";
 
 const st = (t: number) => ({ t, bias: "NONE", candidate: "NONE", ce: {}, pe: {}, flags: [] }) as unknown as ContextState;
 const series = [st(100), st(160), st(220)];
@@ -46,5 +46,16 @@ describe("boxView", () => {
     expect(boxView(out([a, b]), 220, null)).toEqual({ state: b, note: null, flags: [] });
     const r = { ...st(100), na_reason: "IV n/a: set rate in Settings" } as unknown as ContextState;
     expect(boxView(out([r]), null, null).note).toBe("IV n/a: set rate in Settings");
+  });
+});
+
+describe("contextDate", () => {
+  const t = Date.UTC(2026, 10, 16, 9, 19) / 1000; // 14:49 IST
+  it("cursor -> its IST date", () => expect(contextDate(false, Date.UTC(2026, 10, 16, 19, 0) / 1000, null)).toBe("2026-11-17")); // 00:30 IST
+  it("History, no cursor -> the IST date of the pane's last bar", () => expect(contextDate(false, null, t)).toBe("2026-11-16"));
+  it("History, no cursor, no bars yet -> omitted (server picks the last session)", () => expect(contextDate(false, null, null)).toBeUndefined());
+  it("Live -> omitted", () => {
+    expect(contextDate(true, null, t)).toBeUndefined();
+    expect(contextDate(true, t, t)).toBeUndefined();
   });
 });
