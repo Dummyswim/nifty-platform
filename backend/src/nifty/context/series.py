@@ -137,7 +137,9 @@ class _Carry:
 
 
 def _no_expiry_reason(day: date, expiries: Sequence[date]) -> str:
-    return "expiry day: next weekly not recorded" if day in expiries else "no listed weekly expiry"
+    if day in expiries:
+        return "expiry day: next weekly not recorded"
+    return "no recorded option expiry for this day"
 
 
 def _legs(
